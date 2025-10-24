@@ -25,6 +25,7 @@ FAILED_EXIT_STATUS=1
 SKIP_BUILD_BASE_IMAGE=0
 GIT_VERSION=$(git rev-parse --short HEAD)
 VERSION="${VERSION}-${GIT_VERSION}"
+SKIP_CONFIRM=0
 
 function usage {
     local rtn=${SUCCESSFUL_EXIT_STATUS}
@@ -204,6 +205,10 @@ function parse_args {
             usage
             exit
             ;;
+        -y | --yes)
+            shift
+            SKIP_CONFIRM=1
+            ;;
         *)
             usage
             exit 1
@@ -268,7 +273,9 @@ function main {
             REPLY=''
         }
 
-        confirm
+        if [[ $SKIP_CONFIRM == "0" ]]; then
+            confirm
+        fi
 
         execute
         rtn=$?
