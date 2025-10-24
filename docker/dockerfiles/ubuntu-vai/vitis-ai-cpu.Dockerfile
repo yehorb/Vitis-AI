@@ -1,7 +1,8 @@
 #FROM ubuntu:${UBUNTU_VERSION}
-ARG VAI_BASE=artifactory.xilinx.com/vitis-ai-docker-master-local/vitis-ai-cpu-conda-base:latest                                                                               
-  
-From $VAI_BASE
+ARG VAI_BASE=artifactory.xilinx.com/vitis-ai-docker-master-local/vitis-ai-cpu-conda-base:latest
+
+FROM $VAI_BASE
+
 ARG TARGET_FRAMEWORK
 ENV TARGET_FRAMEWORK=$TARGET_FRAMEWORK
 ARG VAI_CONDA_CHANNEL="file:///scratch/conda-channel"
@@ -12,7 +13,7 @@ ARG DOCKER_TYPE='cpu'
 ENV DOCKER_TYPE=$DOCKER_TYPE
 ARG GIT_HASH="<blank>"
 ENV GIT_HASH=$GIT_HASH
-ARG  BUILD_DATE
+ARG BUILD_DATE
 ENV BUILD_DATE=$BUILD_DATE
 ARG XRT_URL=https://www.xilinx.com/bin/public/openDownload?filename=xrt_202120.2.12.427_18.04-amd64-xrt.deb
 ENV XRT_URL=$XRT_URL
@@ -25,7 +26,7 @@ ENV VAI_WEGO_CONDA_CHANNEL=$VAI_WEGO_CONDA_CHANNEL
 
 
 WORKDIR /workspace
-ADD ./common/ .  
+ADD ./common/ .
 ADD ./conda /scratch
 ADD conda/banner.sh /etc/
 ADD conda/${DOCKER_TYPE}_conda/bashrc /etc/bash.bashrc
