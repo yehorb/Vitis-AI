@@ -30,6 +30,11 @@ ADD ./common/ .
 ADD ./conda /scratch
 ADD conda/banner.sh /etc/
 ADD conda/${DOCKER_TYPE}_conda/bashrc /etc/bash.bashrc
-RUN if [[ -n "${TARGET_FRAMEWORK}" ]]; then  bash ./install_${TARGET_FRAMEWORK}.sh; fi
+RUN \
+  --mount=type=cache,target=/home/vitis-ai-user/.cache \
+  --mount=type=cache,target=/home/vitis-ai-user/.conda/pkgs \
+  --mount=type=cache,target=/opt/vitis_ai/conda/pkgs \
+  --mount=type=cache,target=/var/cache/docker \
+  if [[ -n "${TARGET_FRAMEWORK}" ]]; then bash ./install_${TARGET_FRAMEWORK}.sh; fi
 USER root
 RUN mkdir -p ${VAI_ROOT}/conda/pkgs && chmod 777 ${VAI_ROOT}/conda/pkgs && ./install_vairuntime.sh && rm -fr ./*
