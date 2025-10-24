@@ -1,4 +1,4 @@
-#!/usr/bin/env bash                                                                                                                                                                                            
+#!/usr/bin/env bash
 # Copyright 2020 Xilinx Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,9 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
 DOCKER_REPO="${DOCKER_REPO:-xilinx/}"
-VERSION="${VERSION:-`cat dockerfiles/VERSION.txt`}"
+VERSION="${VERSION:-$(cat dockerfiles/VERSION.txt)}"
 DOCKERFILE="${DOCKERFILE:-dockerfiles/ubuntu-vai/vitis-ai-cpu.Dockerfile}"
 XRT_URL="${XRT_URL:-https://www.xilinx.com/bin/public/openDownload?filename=xrt_202220.2.14.418_20.04-amd64-xrt.deb}"
 XRM_URL="${XRM_URL:-https://www.xilinx.com/bin/public/openDownload?filename=xrm_202220.1.5.212_20.04-x86_64.deb}"
@@ -27,118 +26,117 @@ SKIP_BUILD_BASE_IMAGE=0
 GIT_VERSION=$(git rev-parse --short HEAD)
 VERSION="${VERSION}-${GIT_VERSION}"
 
-function usage
-{
+function usage {
     local rtn=${SUCCESSFUL_EXIT_STATUS}
-    echo "usage: $0 -t DOCKER_TYPE  -f FRAMEWORK "
-    echo "   ";
-    echo "   This script builds Vitis AI dockers"
-    echo "   ";
-    echo "  -t | --DOCKER_TYPE         : [Required] Valid values:cpu,gpu,rocm";
-    echo "  -f | --TARGET_FRAMEWORK    : [Required] The Framework to build. Valida values:" 
-    echo "                              For CPU docker: 
-                                            Tensorflow 1.15: tf1
-                                            Tensorflow 2 :   tf2
-                                            Pytorch:         pytorch";
-    echo  "                             For GPU dockers:
-                                            Tensorflow 1.15:       tf1
-                                            Tensorflow 2 :         tf2
-                                            Pytorch:               pytorch"; 
-    echo  "                             For ROCM dockers:
-                                            Tensorflow 2 :         tf2
-                                            Pytorch:               pytorch";
-    echo "  -h | --help              : This message";
+    echo "\
+usage: $0 -t DOCKER_TYPE  -f FRAMEWORK
+
+  This script builds Vitis AI dockers
+
+  -t | --DOCKER_TYPE      : [Required] Valid values:cpu,gpu,rocm
+  -f | --TARGET_FRAMEWORK : [Required] The Framework to build. Valida values:
+                              For CPU docker:
+                                Tensorflow 1.15: tf1
+                                Tensorflow 2 :   tf2
+                                Pytorch:         pytorch
+                              For GPU dockers:
+                                Tensorflow 1.15:       tf1
+                                Tensorflow 2 :         tf2
+                                Pytorch:               pytorch
+                              For ROCM dockers:
+                                Tensorflow 2 :         tf2
+                                Pytorch:               pytorch
+  -h | --help             : This message\
+    "
     return ${rtn}
 }
 
 # Execute
-function execute
-{
+function execute {
+    add_args=""
+    echo "SKIP:${SKIP_BUILD_BASE_IMAGE}, docker type:${DOCKER_TYPE}\n"
 
-  add_args=""
-  echo "SKIP:${SKIP_BUILD_BASE_IMAGE}, docker type:${DOCKER_TYPE}\n"
-
- if [[ "$SKIP_BUILD_BASE_IMAGE" == "0" ]];then
-     if [[ "$DOCKER_TYPE" == 'cpu' ]];then
-         VAI_BASE="ubuntu:20.04"
-          BASE_IMAGE="${BASE_IMAGE:-xilinx/vitis-ai-${DOCKER_TYPE}-base}"
-     fi
-     if [[ "$DOCKER_TYPE" == 'gpu' ]];then
-         if [[ $TARGET_FRAMEWORK =~ .*"pytorch"* ]];then
-
-            VAI_BASE="nvidia/cuda:11.8.0-cudnn8-devel-ubuntu20.04"
-            BASE_IMAGE="${BASE_IMAGE:-xilinx/vitis-ai-${DOCKER_TYPE}-pytorch-base}"
-        else 
-            VAI_BASE="nvidia/cuda:11.8.0-cudnn8-devel-ubuntu20.04"
-            BASE_IMAGE="${BASE_IMAGE:-xilinx/vitis-ai-${DOCKER_TYPE}-tf2-base}"
+    if [[ $SKIP_BUILD_BASE_IMAGE == "0" ]]; then
+        if [[ $DOCKER_TYPE == 'cpu' ]]; then
+            VAI_BASE="ubuntu:20.04"
+            BASE_IMAGE="${BASE_IMAGE:-xilinx/vitis-ai-${DOCKER_TYPE}-base}"
         fi
-         #11.3.1-cudnn8-runtime-ubuntu20.04"
-     fi
-     if [[ "$DOCKER_TYPE" == 'rocm' ]]; then
-    if [[ $TARGET_FRAMEWORK =~ .*"pytorch"* ]];then
-       # VAI_BASE="rocm/pytorch:rocm5.4.1_ubuntu20.04_py3.7_pytorch_1.12.1"
-        VAI_BASE="rocm/pytorch:rocm5.5_ubuntu20.04_py3.8_pytorch_1.13.1"
-        #"xcoartifactory.xilinx.com/uif-docker-master-local/rocmiv-internal-pt:5_ubuntu20.04_py3.8_pytorch_release-1.13_3aa2ef3"
-            add_args=" --build-arg TARGET_FRAMEWORK=$TARGET_FRAMEWORK "
-            BASE_IMAGE="${BASE_IMAGE:-xilinx/vitis-ai-${DOCKER_TYPE}-pytorch-base}"
-         else
-            VAI_BASE="rocm/tensorflow:rocm5.5-tf2.11-dev"
-            BASE_IMAGE="${BASE_IMAGE:-xilinx/vitis-ai-${DOCKER_TYPE}-tf2-base}"
-         fi
-     fi
-      BASE_IMAGE="${BASE_IMAGE:-xilinx/vitis-ai-${DOCKER_TYPE}-base}"
-     echo "VAI_BASE: ${VAI_BASE}"
+        if [[ $DOCKER_TYPE == 'gpu' ]]; then
+            if [[ $TARGET_FRAMEWORK =~ .*"pytorch"* ]]; then
+                VAI_BASE="nvidia/cuda:11.8.0-cudnn8-devel-ubuntu20.04"
+                BASE_IMAGE="${BASE_IMAGE:-xilinx/vitis-ai-${DOCKER_TYPE}-pytorch-base}"
+            else
+                VAI_BASE="nvidia/cuda:11.8.0-cudnn8-devel-ubuntu20.04"
+                BASE_IMAGE="${BASE_IMAGE:-xilinx/vitis-ai-${DOCKER_TYPE}-tf2-base}"
+            fi
+            #11.3.1-cudnn8-runtime-ubuntu20.04"
+        fi
+        if [[ $DOCKER_TYPE == 'rocm' ]]; then
+            if [[ $TARGET_FRAMEWORK =~ .*"pytorch"* ]]; then
+                # VAI_BASE="rocm/pytorch:rocm5.4.1_ubuntu20.04_py3.7_pytorch_1.12.1"
+                VAI_BASE="rocm/pytorch:rocm5.5_ubuntu20.04_py3.8_pytorch_1.13.1"
+                #"xcoartifactory.xilinx.com/uif-docker-master-local/rocmiv-internal-pt:5_ubuntu20.04_py3.8_pytorch_release-1.13_3aa2ef3"
+                add_args=" --build-arg TARGET_FRAMEWORK=$TARGET_FRAMEWORK "
+                BASE_IMAGE="${BASE_IMAGE:-xilinx/vitis-ai-${DOCKER_TYPE}-pytorch-base}"
+            else
+                VAI_BASE="rocm/tensorflow:rocm5.5-tf2.11-dev"
+                BASE_IMAGE="${BASE_IMAGE:-xilinx/vitis-ai-${DOCKER_TYPE}-tf2-base}"
+            fi
+        fi
+        BASE_IMAGE="${BASE_IMAGE:-xilinx/vitis-ai-${DOCKER_TYPE}-base}"
+        echo "VAI_BASE: ${VAI_BASE}"
 
-     echo "BUild Base image:${BASE_IMAGE} first"
-     buildcmd="docker build  --network=host \
-           --build-arg DOCKER_TYPE=$DOCKER_TYPE \
-               --build-arg VAI_BASE=${VAI_BASE} \
-               -t ${BASE_IMAGE} $add_args  \
-               -f dockerfiles/ubuntu-vai/CondaBase.Dockerfile  \
-                .
-         " 
-    echo "CMD: $buildcmd \n"
-    ${buildcmd}
-    rtn=$?
-    if [[ $rtn -ne 0 ]]; then
-     echo "FAILD build base image"
-     exit 1
+        echo "Build Base image:${BASE_IMAGE} first"
+        buildcmd="\
+docker build \
+    --network=host \
+    --build-arg DOCKER_TYPE=$DOCKER_TYPE \
+    --build-arg VAI_BASE=${VAI_BASE} \
+    -t ${BASE_IMAGE} $add_args \
+    -f dockerfiles/ubuntu-vai/CondaBase.Dockerfile \
+    .
+        "
+        echo "CMD: $buildcmd \n"
+        ${buildcmd}
+        rtn=$?
+        if [[ $rtn -ne 0 ]]; then
+            echo "FAILD build base image"
+            exit 1
+        fi
     fi
- fi
- buildcmd="docker build --network=host \
-     --build-arg TARGET_FRAMEWORK=$TARGET_FRAMEWORK \
-     --build-arg DOCKER_TYPE=$DOCKER_TYPE \
-     --build-arg XRT_URL=${XRT_URL} \
-     --build-arg XRM_URL=${XRM_URL} \
-     --build-arg VAI_BASE=${BASE_IMAGE} \
-     --build-arg PETALINUX_URL=${PETALINUX_URL} \
-     --build-arg VAI_CONDA_CHANNEL=${VAI_CONDA_CHANNEL} \
-     --build-arg VAI_WEGO_CONDA_CHANNEL=${VAI_WEGO_CONDA_CHANNEL} \
-     --build-arg VAI_DEB_CHANNEL=${VAI_DEB_CHANNEL} \
-     --build-arg VERSION=${VERSION} \
-     --build-arg GIT_HASH=`git rev-parse --short HEAD` \
-     --build-arg CACHEBUST=$(date +%s) \
-     --build-arg BUILD_DATE=$(date -I) \
-     -f ${DOCKERFILE} -t $IMAGE_TAG ./ "
- echo "$buildcmd"
- $buildcmd
- rtn=$?
- return ${rtn}
+    buildcmd="\
+docker build
+    --network=host \
+    --build-arg TARGET_FRAMEWORK=$TARGET_FRAMEWORK \
+    --build-arg DOCKER_TYPE=$DOCKER_TYPE \
+    --build-arg XRT_URL=${XRT_URL} \
+    --build-arg XRM_URL=${XRM_URL} \
+    --build-arg VAI_BASE=${BASE_IMAGE} \
+    --build-arg PETALINUX_URL=${PETALINUX_URL} \
+    --build-arg VAI_CONDA_CHANNEL=${VAI_CONDA_CHANNEL} \
+    --build-arg VAI_WEGO_CONDA_CHANNEL=${VAI_WEGO_CONDA_CHANNEL} \
+    --build-arg VAI_DEB_CHANNEL=${VAI_DEB_CHANNEL} \
+    --build-arg VERSION=${VERSION} \
+    --build-arg GIT_HASH=$(git rev-parse --short HEAD) \
+    --build-arg CACHEBUST=$(date +%s) \
+    --build-arg BUILD_DATE=$(date -I) \
+    -f ${DOCKERFILE} -t $IMAGE_TAG ./ \
+    "
+    echo "$buildcmd"
+    $buildcmd
+    rtn=$?
+    return ${rtn}
 }
 
-
-
 # Prereq
-function prereq
-{
+function prereq {
     local rtn=${SUCCESSFUL_EXIT_STATUS}
     # passed
     return ${rtn}
 }
 
 # Validate Arguments
-function validate_args
-{
+function validate_args {
     local rtn=${SUCCESSFUL_EXIT_STATUS}
     echo -ne "Validating Arguments... \n"
     echo "Your inputs: Docker-Type:$DOCKER_TYPE, FrameWork:$TARGET_FRAMEWORK"
@@ -147,31 +145,30 @@ function validate_args
         echo "Please specify FREAMEWORK to BUILD!"
         rtn=${FAILED_EXIT_STATUS}
     else
-	if [[ "$DOCKER_TYPE" == 'cpu' ]]; then
-          if [[ "$TARGET_FRAMEWORK" != "tf1" && "$TARGET_FRAMEWORK" != 'tf2' &&  "$TARGET_FRAMEWORK" != 'pytorch' ]]; then
-	    echo "Error: For CPU docker, Validate value for TARGET_FRAMEWORK are:"
-	    echo "    tf1,tf2,pytorch"
-	     rtn=${FAILED_EXIT_STATUS}
-          fi
-        elif [[ "$DOCKER_TYPE" == 'gpu' ]]; then
-           if [[ "$TARGET_FRAMEWORK" != "tf1" && "$TARGET_FRAMEWORK" != 'tf2' && "$TARGET_FRAMEWORK" != 'pytorch' ]]; then
-            echo "Error: For Nvidia GPU  docker, Validate value for TARGET_FRAMEWORK are:"
-            echo "    tf1,tf2,pytorch"
-             rtn=${FAILED_EXIT_STATUS}
-          fi
-
-        elif [[ "$DOCKER_TYPE" == 'rocm' ]]; then
-          if [[ "$TARGET_FRAMEWORK" != 'pytorch' &&  "$TARGET_FRAMEWORK" != 'tf2' ]]; then
-            echo "Error: For ROCM docker, Validate value for TARGET_FRAMEWORK are:"
-            echo "    tf2,pytorch"
-             rtn=${FAILED_EXIT_STATUS}
-          fi
+        if [[ $DOCKER_TYPE == 'cpu' ]]; then
+            if [[ $TARGET_FRAMEWORK != "tf1" && $TARGET_FRAMEWORK != 'tf2' && $TARGET_FRAMEWORK != 'pytorch' ]]; then
+                echo "Error: For CPU docker, Validate value for TARGET_FRAMEWORK are:"
+                echo "    tf1,tf2,pytorch"
+                rtn=${FAILED_EXIT_STATUS}
+            fi
+        elif [[ $DOCKER_TYPE == 'gpu' ]]; then
+            if [[ $TARGET_FRAMEWORK != "tf1" && $TARGET_FRAMEWORK != 'tf2' && $TARGET_FRAMEWORK != 'pytorch' ]]; then
+                echo "Error: For Nvidia GPU  docker, Validate value for TARGET_FRAMEWORK are:"
+                echo "    tf1,tf2,pytorch"
+                rtn=${FAILED_EXIT_STATUS}
+            fi
+        elif [[ $DOCKER_TYPE == 'rocm' ]]; then
+            if [[ $TARGET_FRAMEWORK != 'pytorch' && $TARGET_FRAMEWORK != 'tf2' ]]; then
+                echo "Error: For ROCM docker, Validate value for TARGET_FRAMEWORK are:"
+                echo "    tf2,pytorch"
+                rtn=${FAILED_EXIT_STATUS}
+            fi
         fi
     fi
 
     # pass?
     if [ ${rtn} -eq "${FAILED_EXIT_STATUS}" ]; then
-	    usage
+        usage
     else
         echo "passed!"
     fi
@@ -179,8 +176,7 @@ function validate_args
 }
 
 # Parse Arguments
-function parse_args
-{
+function parse_args {
     local rtn=${SUCCESSFUL_EXIT_STATUS}
     # positional args
     args=()
@@ -188,29 +184,30 @@ function parse_args
     # named args
     while [ "$1" != "" ]; do
         case "$1" in
-           -t| --DOCKER_TYPE)
-                shift
-                DOCKER_TYPE=$1
-                ;;
-            -f|--TARGET_FRAMEWORK)
-                shift
-                TARGET_FRAMEWORK=$1
-                ;;
-            -b| --BASE_IMAGE)
-                shift
-                BASE_IMAGE=$1
-                ;;
-            -s| --SKIP_BUILD_BASE_IMAGE)
-                shift
-                SKIP_BUILD_BASE_IMAGE=1
-                ;;
-            -h | --help )
-                usage
-                exit
-                ;;
-            * )
-                usage
-                exit 1
+        -t | --DOCKER_TYPE)
+            shift
+            DOCKER_TYPE=$1
+            ;;
+        -f | --TARGET_FRAMEWORK)
+            shift
+            TARGET_FRAMEWORK=$1
+            ;;
+        -b | --BASE_IMAGE)
+            shift
+            BASE_IMAGE=$1
+            ;;
+        -s | --SKIP_BUILD_BASE_IMAGE)
+            shift
+            SKIP_BUILD_BASE_IMAGE=1
+            ;;
+        -h | --help)
+            usage
+            exit
+            ;;
+        *)
+            usage
+            exit 1
+            ;;
         esac
         shift
     done
@@ -218,8 +215,7 @@ function parse_args
 }
 
 # Main
-function main
-{
+function main {
     local rtn=${SUCCESSFUL_EXIT_STATUS}
     parse_args "$@"
     rtn=$?
@@ -229,9 +225,9 @@ function main
     fi
     IMG_FW=""
     case $TARGET_FRAMEWORK in
-        tf1) IMG_FW="tensorflow";;
-        tf2) IMG_FW="tensorflow2";;
-        pytorch) IMG_FW="pytorch";; 
+    tf1) IMG_FW="tensorflow" ;;
+    tf2) IMG_FW="tensorflow2" ;;
+    pytorch) IMG_FW="pytorch" ;;
     esac
 
     BRAND="${BRAND:-vitis-ai-${IMG_FW}-${DOCKER_TYPE}}"
@@ -261,23 +257,23 @@ function main
         sed -n '308, 500p' $prompt_file
         read -n 1 -s -r -p "Press any key to continue..." key
 
-       confirm() {                                                                                                                                                                                                        echo -en "\n\nDo you agree to the terms and wish to proceed [y/n]? "
-           read REPLY
-           case $REPLY in
-               [Yy]) ;;
-               [Nn]) exit 0 ;;
-               *) confirm ;;
-           esac
-          REPLY=''
-       }
+        confirm() {
+            echo -en "\n\nDo you agree to the terms and wish to proceed [y/n]? "
+            read REPLY
+            case $REPLY in
+            [Yy]) ;;
+            [Nn]) exit 0 ;;
+            *) confirm ;;
+            esac
+            REPLY=''
+        }
 
-    confirm
+        confirm
 
-    execute
-    rtn=$?
-  fi
-  return ${rtn}
+        execute
+        rtn=$?
+    fi
+    return ${rtn}
 }
 
-main "$@";
-
+main "$@"
