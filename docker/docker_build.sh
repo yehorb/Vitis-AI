@@ -195,7 +195,6 @@ function parse_args {
             BASE_IMAGE=$1
             ;;
         -s | --SKIP_BUILD_BASE_IMAGE)
-            shift
             SKIP_BUILD_BASE_IMAGE=1
             ;;
         -h | --help)
@@ -203,7 +202,6 @@ function parse_args {
             exit
             ;;
         -y | --yes)
-            shift
             SKIP_CONFIRM=1
             ;;
         *)
