@@ -25,6 +25,7 @@ FAILED_EXIT_STATUS=1
 SKIP_BUILD_BASE_IMAGE=0
 GIT_VERSION=$(git rev-parse --short HEAD)
 VERSION="${VERSION}-${GIT_VERSION}"
+SKIP_CONFIRM=0
 
 function usage {
     local rtn=${SUCCESSFUL_EXIT_STATUS}
@@ -194,12 +195,14 @@ function parse_args {
             BASE_IMAGE=$1
             ;;
         -s | --SKIP_BUILD_BASE_IMAGE)
-            shift
             SKIP_BUILD_BASE_IMAGE=1
             ;;
         -h | --help)
             usage
             exit
+            ;;
+        -y | --yes)
+            SKIP_CONFIRM=1
             ;;
         *)
             usage
@@ -237,8 +240,7 @@ function main {
         rtn=$?
     fi
 
-    if [ "${rtn}" -eq "${SUCCESSFUL_EXIT_STATUS}" ]; then
-
+    if [[ ${rtn} -eq ${SUCCESSFUL_EXIT_STATUS} && $SKIP_CONFIRM == "0" ]]; then
         prompt_file="./dockerfiles/PROMPT/PROMPT_${DOCKER_TYPE}.txt"
 
         sed -n '1, 5p' $prompt_file #./dockerfiles/PROMPT/PROMPT_cpu.txt # $prompt_file
@@ -266,7 +268,9 @@ function main {
         }
 
         confirm
+    fi
 
+    if [ "${rtn}" -eq "${SUCCESSFUL_EXIT_STATUS}" ]; then
         execute
         rtn=$?
     fi
