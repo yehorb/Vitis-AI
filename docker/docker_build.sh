@@ -240,7 +240,7 @@ function main {
         rtn=$?
     fi
 
-    if [ "${rtn}" -eq "${SUCCESSFUL_EXIT_STATUS}" ]; then
+    if [[ "${rtn}" -eq "${SUCCESSFUL_EXIT_STATUS}" && $SKIP_CONFIRM == "0" ]]; then
 
         prompt_file="./dockerfiles/PROMPT/PROMPT_${DOCKER_TYPE}.txt"
 
@@ -268,10 +268,10 @@ function main {
             REPLY=''
         }
 
-        if [[ $SKIP_CONFIRM == "0" ]]; then
-            confirm
-        fi
+        confirm
+    fi
 
+    if [ "${rtn}" -eq "${SUCCESSFUL_EXIT_STATUS}" ]; then
         execute
         rtn=$?
     fi
