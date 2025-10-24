@@ -29,7 +29,7 @@ SKIP_CONFIRM=0
 
 function usage {
     local rtn=${SUCCESSFUL_EXIT_STATUS}
-    echo "\
+    echo "
 usage: $0 -t DOCKER_TYPE  -f FRAMEWORK
 
   This script builds Vitis AI dockers
@@ -41,14 +41,13 @@ usage: $0 -t DOCKER_TYPE  -f FRAMEWORK
                                 Tensorflow 2 :   tf2
                                 Pytorch:         pytorch
                               For GPU dockers:
-                                Tensorflow 1.15:       tf1
-                                Tensorflow 2 :         tf2
-                                Pytorch:               pytorch
+                                Tensorflow 1.15: tf1
+                                Tensorflow 2 :   tf2
+                                Pytorch:         pytorch
                               For ROCM dockers:
-                                Tensorflow 2 :         tf2
-                                Pytorch:               pytorch
-  -h | --help             : This message\
-    "
+                                Tensorflow 2 :   tf2
+                                Pytorch:         pytorch
+  -h | --help             : This message"
     return ${rtn}
 }
 
@@ -88,15 +87,14 @@ function execute {
         echo "VAI_BASE: ${VAI_BASE}"
 
         echo "Build Base image:${BASE_IMAGE} first"
-        buildcmd="\
+        buildcmd="
 docker build \
     --network=host \
     --build-arg DOCKER_TYPE=$DOCKER_TYPE \
     --build-arg VAI_BASE=${VAI_BASE} \
     -t ${BASE_IMAGE} $add_args \
     -f dockerfiles/ubuntu-vai/CondaBase.Dockerfile \
-    .
-        "
+    ."
         echo "CMD: $buildcmd \n"
         ${buildcmd}
         rtn=$?
@@ -105,7 +103,7 @@ docker build \
             exit 1
         fi
     fi
-    buildcmd="\
+    buildcmd="
 docker build
     --network=host \
     --build-arg TARGET_FRAMEWORK=$TARGET_FRAMEWORK \
@@ -121,8 +119,7 @@ docker build
     --build-arg GIT_HASH=$(git rev-parse --short HEAD) \
     --build-arg CACHEBUST=$(date +%s) \
     --build-arg BUILD_DATE=$(date -I) \
-    -f ${DOCKERFILE} -t $IMAGE_TAG ./ \
-    "
+    -f ${DOCKERFILE} -t $IMAGE_TAG ./"
     echo "$buildcmd"
     $buildcmd
     rtn=$?
