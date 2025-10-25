@@ -178,8 +178,7 @@ install_ubuntu() {
         chown -R vitis-ai-user:vitis-ai-group ${VAI_ROOT}
 
     # Cleanup package manager
-    apt-get autoclean && apt-get clean
-    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+    rm -rf /tmp/* /var/tmp/*
 }
 
 # Install base packages depending on the base OS
