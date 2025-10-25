@@ -154,19 +154,17 @@ install_ubuntu() {
         echo $TZ >/etc/timezone &&
         dpkg-reconfigure -f noninteractive tzdata
 
-    cd /tmp && wget --progress=dot:mega https://github.com/json-c/json-c/archive/json-c-0.15-20200726.tar.gz &&
-        tar xvf json-c-0.15-20200726.tar.gz &&
-        cd json-c-json-c-0.15-20200726 &&
+    export JSON_C_VERSION="json-c-0.18-20240915"
+    cd /tmp && wget --progress=dot:mega https://github.com/json-c/json-c/archive/${JSON_C_VERSION}.tar.gz &&
+        tar xvf ${JSON_C_VERSION}.tar.gz &&
+        cd json-c-${JSON_C_VERSION} &&
         mkdir build &&
         cd build &&
         cmake -DBUILD_SHARED_LIBS=ON .. &&
         make -j &&
         make install
 
-    export GOSU_VERSION="1.12"
-
-    #COPY dockerfiles/bashrc /etc/bash.bashrc
-    #RUN chmod a+rwx /etc/bash.bashrc
+    export GOSU_VERSION="1.19"
     groupadd vitis-ai-group &&
         useradd --shell /bin/bash -c '' -m -g vitis-ai-group vitis-ai-user &&
         passwd -d vitis-ai-user &&
