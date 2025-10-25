@@ -13,7 +13,13 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 WORKDIR /workspace
 ADD ./common/ .
-RUN bash ./install_base.sh ${DOCKER_TYPE} ${TARGET_FRAMEWORK}
+
+RUN rm -f /etc/apt/apt.conf.d/docker-clean; echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+  --mount=type=cache,target=/var/lib/apt,sharing=locked \
+  bash ./install_base.sh ${DOCKER_TYPE} ${TARGET_FRAMEWORK}
 
 USER vitis-ai-user
-RUN bash ./install_conda.sh
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+  --mount=type=cache,target=/var/lib/apt,sharing=locked \
+  bash ./install_conda.sh
