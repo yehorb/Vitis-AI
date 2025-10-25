@@ -26,6 +26,7 @@ SKIP_BUILD_BASE_IMAGE=0
 GIT_VERSION=$(git rev-parse --short HEAD)
 VERSION="${VERSION}-${GIT_VERSION}"
 SKIP_CONFIRM=0
+SKIP_BUILD_VITIS=0
 
 function usage {
     local rtn=${SUCCESSFUL_EXIT_STATUS}
@@ -54,7 +55,7 @@ usage: $0 -t DOCKER_TYPE  -f FRAMEWORK
 # Execute
 function execute {
     add_args=""
-    echo "SKIP:${SKIP_BUILD_BASE_IMAGE}, docker type:${DOCKER_TYPE}\n"
+    echo "SKIP (base):${SKIP_BUILD_BASE_IMAGE}, SKIP (vitis): ${SKIP_BUILD_VITIS}, docker type:${DOCKER_TYPE}\n"
 
     if [[ $SKIP_BUILD_BASE_IMAGE == "0" ]]; then
         if [[ $DOCKER_TYPE == 'cpu' ]]; then
@@ -103,6 +104,12 @@ docker build \
             exit 1
         fi
     fi
+
+    if [[ ${SKIP_BUILD_VITIS} == "1" ]]; then
+        echo "skipping vitis build"
+        exit 0
+    fi
+
     buildcmd="\
 docker build
     --network=host \
@@ -196,6 +203,9 @@ function parse_args {
             ;;
         -s | --SKIP_BUILD_BASE_IMAGE)
             SKIP_BUILD_BASE_IMAGE=1
+            ;;
+        -sv | --SKIP_BUILD_VITIS)
+            SKIP_BUILD_VITIS=1
             ;;
         -h | --help)
             usage
