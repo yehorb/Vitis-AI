@@ -12,8 +12,9 @@ else
 
     sudo chmod 777 /root /root/.local /root/.local/bin || true
 
+    export MINIFORGE_VERSION="25.3.1-0"
     cd /tmp &&
-        wget --progress=dot:mega https://github.com/conda-forge/miniforge/releases/download/4.10.3-5/Mambaforge-4.10.3-5-Linux-x86_64.sh -O miniconda.sh &&
+        wget --progress=dot:mega https://github.com/conda-forge/miniforge/releases/download/${MINIFORGE_VERSION}/Miniforge3-${MINIFORGE_VERSION}-Linux-x86_64.sh &&
         /bin/bash ./miniconda.sh -b -p $VAI_ROOT/conda &&
         . $VAI_ROOT/conda/etc/profile.d/conda.sh &&
         rm -fr /tmp/miniconda.sh &&
