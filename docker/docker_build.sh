@@ -64,10 +64,10 @@ function execute {
         fi
         if [[ $DOCKER_TYPE == 'gpu' ]]; then
             if [[ $TARGET_FRAMEWORK =~ .*"pytorch"* ]]; then
-                VAI_BASE="nvidia/cuda:11.8.0-cudnn8-devel-ubuntu20.04"
+                VAI_BASE="nvidia/cuda:13.0.1-cudnn-devel-ubuntu24.04"
                 BASE_IMAGE="${BASE_IMAGE:-xilinx/vitis-ai-${DOCKER_TYPE}-pytorch-base}"
             else
-                VAI_BASE="nvidia/cuda:11.8.0-cudnn8-devel-ubuntu20.04"
+                VAI_BASE="nvidia/cuda:13.0.1-cudnn-devel-ubuntu24.04"
                 BASE_IMAGE="${BASE_IMAGE:-xilinx/vitis-ai-${DOCKER_TYPE}-tf2-base}"
             fi
             #11.3.1-cudnn8-runtime-ubuntu20.04"
