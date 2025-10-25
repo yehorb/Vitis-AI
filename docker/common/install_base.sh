@@ -124,8 +124,9 @@ install_ubuntu() {
 
     os_version=$(lsb_release -r -s)
     echo "base OS version:${os_version}"
-    apt-get update -y && apt-get install -y pybind11-dev python3-pybind11 libopencv-dev gcc-9 gcc-10 g++-9 g++-10 \
-        libprotobuf-c-dev protobuf-compiler python-protobuf swig
+    apt-get update -y && apt-get install -y --no-install-recommends \
+        pybind11-dev python3-pybind11 libopencv-dev gcc-9 gcc-10 g++-9 g++-10 \
+        libprotobuf-c-dev protobuf-compiler python3-protobuf swig
 
     update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 10 \
         --slave /usr/bin/g++ g++ /usr/bin/g++-9 \
@@ -139,10 +140,10 @@ install_ubuntu() {
         exit 1
     fi
 
-    pip3 install \
-        Flask \
-        setuptools \
-        wheel
+    apt-get install -y --no-install-recommends \
+        python3-flask \
+        python3-setuptools \
+        python3-wheel
 
     sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen &&
         echo "LC_ALL=en_US.UTF-8" >>/etc/environment &&
