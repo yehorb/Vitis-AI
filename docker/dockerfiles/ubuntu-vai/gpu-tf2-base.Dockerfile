@@ -171,14 +171,12 @@ USER vitis-ai-user
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    export HOME=~vitis-ai-user && \
-        sudo chmod -R 777 /root /root/.local /root/.local/bin || true && \
-        export MINIFORGE_VERSION="25.3.1-0" && \
+    export MINIFORGE_VERSION="25.3.1-0" && \
         cd /tmp && \
         wget --progress=dot:mega https://github.com/conda-forge/miniforge/releases/download/${MINIFORGE_VERSION}/Miniforge3-${MINIFORGE_VERSION}-Linux-x86_64.sh && \
-        /bin/bash ./miniconda.sh -b -p $VAI_ROOT/conda && \
-        . $VAI_ROOT/conda/etc/profile.d/conda.sh && \
+        ./miniconda.sh -b -p $VAI_ROOT/conda && \
+        sudo ln -s $VAI_ROOT/conda/etc/profile.d/conda.sh /etc/profile.d/conda.sh && \
         rm -fr /tmp/miniconda.sh && \
-        /$VAI_ROOT/conda/bin/conda clean -y --force-pkgs-dirs && \
-        echo ". $VAI_ROOT/conda/etc/profile.d/conda.sh" >>~vitis-ai-user/.bashrc && \
-        sudo ln -s $VAI_ROOT/conda/etc/profile.d/conda.sh /etc/profile.d/conda.sh
+        /$VAI_ROOT/conda/bin/conda clean -y --force-pkgs-dirs
+
+RUN sudo chmod -R 777 /root /root/.local /root/.local/bin || true
