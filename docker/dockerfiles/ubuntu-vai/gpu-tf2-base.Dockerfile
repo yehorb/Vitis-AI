@@ -107,8 +107,8 @@ RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && \
         echo $TZ >/etc/timezone && \
         dpkg-reconfigure -f noninteractive tzdata
 
-RUN export JSON_C_VERSION="json-c-0.18-20240915" && \
-        cd /tmp && \
+ENV JSON_C_VERSION="json-c-0.18-20240915"
+RUN cd /tmp && \
         wget --progress=dot:mega https://github.com/json-c/json-c/archive/${JSON_C_VERSION}.tar.gz && \
         tar xvf ${JSON_C_VERSION}.tar.gz && \
         cd json-c-${JSON_C_VERSION} && \
@@ -118,8 +118,8 @@ RUN export JSON_C_VERSION="json-c-0.18-20240915" && \
         make -j && \
         make install
 
-RUN export GOSU_VERSION="1.19" && \
-        wget --progress=dot:mega -O /usr/local/bin/gosu "https://github.com/tianon/gosu/releases/download/$GOSU_VERSION/gosu-$(dpkg --print-architecture)" && \
+ENV GOSU_VERSION="1.19"
+RUN wget --progress=dot:mega -O /usr/local/bin/gosu "https://github.com/tianon/gosu/releases/download/$GOSU_VERSION/gosu-$(dpkg --print-architecture)" && \
         chmod +x /usr/local/bin/gosu
 
 RUN groupadd vitis-ai-group && \
@@ -137,8 +137,8 @@ RUN chmod 1777 /tmp && \
 FROM cuda_base AS conda_base
 
 USER vitis-ai-user
+ENV MINIFORGE_VERSION="25.3.1-0"
 RUN cd /tmp && \
-        export MINIFORGE_VERSION="25.3.1-0" && \
         wget --progress=dot:mega -O miniforge.sh https://github.com/conda-forge/miniforge/releases/download/${MINIFORGE_VERSION}/Miniforge3-${MINIFORGE_VERSION}-Linux-x86_64.sh && \
         chmod +x ./miniforge.sh && \
         ./miniforge.sh -b -p $VAI_ROOT/conda && \
