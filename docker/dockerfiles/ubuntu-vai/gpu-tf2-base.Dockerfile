@@ -23,104 +23,72 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
             build-essential \
             bzip2 \
             ca-certificates \
+            cmake \
             curl \
+            ffmpeg \
             g++ \
+            g++-10 \
+            g++-9 \
+            gcc-10 \
+            gcc-9 \
             gdb \
             git \
             gnupg \
-            locales \
+            libavcodec-dev \
+            libavformat-dev \
             libboost-all-dev \
+            libeigen3-dev \
             libgflags-dev \
             libgoogle-glog-dev \
+            libgstreamer-plugins-base1.0-dev \
+            libgstreamer1.0-dev \
             libgtest-dev \
+            libgtk-3-dev \
+            libgtk2.0-dev \
+            libhdf5-dev \
+            libjpeg-dev \
             libjsoncpp-dev \
+            libopencv-dev \
+            libopenexr-dev \
+            libpng-dev \
+            libprotobuf-c-dev \
             libssl-dev \
+            libswscale-dev \
+            libtiff-dev \
             libtool \
             libunwind-dev \
+            libwebp-dev \
+            locales \
             make \
-            cmake \
+            opencl-clhpp-headers \
+            opencl-headers \
             openssh-client \
             openssl \
+            pocl-opencl-icd \
+            protobuf-compiler \
+            pybind11-dev \
             python3 \
             python3-dev \
+            python3-flask \
             python3-minimal \
             python3-numpy \
             python3-opencv \
             python3-pip \
+            python3-protobuf \
+            python3-pybind11 \
             python3-setuptools \
             python3-venv \
+            python3-wheel \
             software-properties-common \
             sudo \
+            swig \
             tree \
             tzdata \
             unzip \
             vim \
             wget \
             yasm \
-            zstd \
-            libavcodec-dev \
-            libavformat-dev \
-            libeigen3-dev \
-            libgstreamer-plugins-base1.0-dev \
-            libgstreamer1.0-dev \
-            libgtest-dev \
-            libgtk-3-dev \
-            libgtk2.0-dev \
-            libhdf5-dev \
-            libjpeg-dev \
-            libopenexr-dev \
-            libpng-dev \
-            libswscale-dev \
-            libtiff-dev \
-            libwebp-dev \
-            opencl-clhpp-headers \
-            opencl-headers \
-            pocl-opencl-icd \
-            python3-opencv \
-            python3-pip \
-            python3-setuptools \
-            python3-venv \
-            software-properties-common \
-            sudo \
-            tree \
-            unzip \
-            vim \
-            wget \
-            yasm \
-            zstd \
-            libavcodec-dev \
-            libavformat-dev \
-            libeigen3-dev \
-            libgstreamer-plugins-base1.0-dev \
-            libgstreamer1.0-dev \
-            libgtest-dev \
-            libgtk-3-dev \
-            libgtk2.0-dev \
-            libhdf5-dev \
-            libjpeg-dev \
-            libopenexr-dev \
-            libpng-dev \
-            libswscale-dev \
-            libtiff-dev \
-            libwebp-dev \
-            opencl-clhpp-headers \
-            opencl-headers \
-            ffmpeg \
-            pocl-opencl-icd \
-            pybind11-dev \
-            python3-pybind11 \
-            libopencv-dev \
-            gcc-9 \
-            gcc-10 \
-            g++-9 \
-            g++-10 \
-            libprotobuf-c-dev \
-            protobuf-compiler \
-            python3-protobuf \
-            swig \
-            python3-flask \
-            python3-setuptools \
-            python3-wheel
+            zstd
 
 RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 10 \
         --slave /usr/bin/g++ g++ /usr/bin/g++-9 \
