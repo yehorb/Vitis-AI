@@ -1,5 +1,5 @@
 ARG CUDA_BASE_IMAGE=nvidia/cuda:13.0.1-cudnn-devel-ubuntu24.04
-FROM $CUDA_BASE_IMAGE as cuda_base
+FROM $CUDA_BASE_IMAGE AS cuda_base
 
 SHELL ["/bin/bash", "-c"]
 
@@ -140,7 +140,8 @@ RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && \
         dpkg-reconfigure -f noninteractive tzdata
 
 RUN export JSON_C_VERSION="json-c-0.18-20240915" && \
-        cd /tmp && wget --progress=dot:mega https://github.com/json-c/json-c/archive/${JSON_C_VERSION}.tar.gz && \
+        cd /tmp && \
+        wget --progress=dot:mega https://github.com/json-c/json-c/archive/${JSON_C_VERSION}.tar.gz && \
         tar xvf ${JSON_C_VERSION}.tar.gz && \
         cd json-c-${JSON_C_VERSION} && \
         mkdir build && \
@@ -150,7 +151,7 @@ RUN export JSON_C_VERSION="json-c-0.18-20240915" && \
         make install
 
 RUN export GOSU_VERSION="1.19" && \
-        curl -sSkLo /usr/local/bin/gosu "https://github.com/tianon/gosu/releases/download/$GOSU_VERSION/gosu-$(dpkg --print-architecture)" && \
+        wget --progress=dot:mega -O /usr/local/bin/gosu "https://github.com/tianon/gosu/releases/download/$GOSU_VERSION/gosu-$(dpkg --print-architecture)" && \
         chmod +x /usr/local/bin/gosu
 
 RUN groupadd vitis-ai-group && \
@@ -165,18 +166,19 @@ RUN chmod 1777 /tmp && \
         mkdir -p ${VAI_ROOT} && \
         chown -R vitis-ai-user:vitis-ai-group ${VAI_ROOT}
 
-FROM cuda_base as conda_base
+FROM cuda_base AS conda_base
 
 USER vitis-ai-user
-
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    export MINIFORGE_VERSION="25.3.1-0" && \
-        cd /tmp && \
-        wget --progress=dot:mega https://github.com/conda-forge/miniforge/releases/download/${MINIFORGE_VERSION}/Miniforge3-${MINIFORGE_VERSION}-Linux-x86_64.sh && \
-        ./miniconda.sh -b -p $VAI_ROOT/conda && \
-        sudo ln -s $VAI_ROOT/conda/etc/profile.d/conda.sh /etc/profile.d/conda.sh && \
-        rm -fr /tmp/miniconda.sh && \
+RUN cd /tmp && \
+        export MINIFORGE_VERSION="25.3.1-0" && \
+        wget --progress=dot:mega -O miniforge.sh https://github.com/conda-forge/miniforge/releases/download/${MINIFORGE_VERSION}/Miniforge3-${MINIFORGE_VERSION}-Linux-x86_64.sh && \
+        chmod +x ./miniforge.sh && \
+        ./miniforge.sh -b -p $VAI_ROOT/conda && \
+        rm -fr /tmp/miniforge.sh && \
         /$VAI_ROOT/conda/bin/conda clean -y --force-pkgs-dirs
 
-RUN sudo chmod -R 777 /root /root/.local /root/.local/bin || true
+USER root
+RUN ln -s $VAI_ROOT/conda/etc/profile.d/conda.sh /etc/profile.d/conda.sh && \
+        chmod -R 777 /root /root/.local /root/.local/bin || true
+
+USER vitis-ai-user
