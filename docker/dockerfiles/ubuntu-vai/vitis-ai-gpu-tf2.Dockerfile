@@ -1,16 +1,10 @@
-#FROM ubuntu:${UBUNTU_VERSION}
-ARG VAI_BASE=artifactory.xilinx.com/vitis-ai-docker-master-local/vitis-ai-cpu-conda-base:latest
-
+ARG VAI_BASE=xilinx/vitis-ai-gpu-tf2-base:latest
 FROM $VAI_BASE
 
-ARG TARGET_FRAMEWORK
-ENV TARGET_FRAMEWORK=$TARGET_FRAMEWORK
 ARG VAI_CONDA_CHANNEL="file:///scratch/conda-channel"
 ENV VAI_CONDA_CHANNEL=$VAI_CONDA_CHANNEL
 ARG VERSION
 ENV VERSION=$VERSION
-ARG DOCKER_TYPE='cpu'
-ENV DOCKER_TYPE=$DOCKER_TYPE
 ARG GIT_HASH="<blank>"
 ENV GIT_HASH=$GIT_HASH
 ARG BUILD_DATE
@@ -26,15 +20,24 @@ ENV VAI_WEGO_CONDA_CHANNEL=$VAI_WEGO_CONDA_CHANNEL
 
 
 WORKDIR /workspace
-ADD ./common/ .
-ADD ./conda /scratch
-ADD conda/banner.sh /etc/
-ADD conda/${DOCKER_TYPE}_conda/bashrc /etc/bash.bashrc
-RUN \
-  --mount=type=cache,target=/home/vitis-ai-user/.cache \
-  --mount=type=cache,target=/home/vitis-ai-user/.conda/pkgs \
-  --mount=type=cache,target=/opt/vitis_ai/conda/pkgs \
-  --mount=type=cache,target=/var/cache/docker \
-  if [[ -n "${TARGET_FRAMEWORK}" ]]; then bash ./install_${TARGET_FRAMEWORK}.sh; fi
-USER root
-RUN mkdir -p ${VAI_ROOT}/conda/pkgs && chmod 777 ${VAI_ROOT}/conda/pkgs && ./install_vairuntime.sh && rm -fr ./*
+
+COPY ./common/ .
+COPY ./conda /scratch
+COPY conda/banner.sh /etc/
+COPY conda/gpu_conda/bashrc /etc/bash.bashrc
+
+# Install and set up a conda channel
+ENV DOWNLOAD_DIR="/var/cache/docker/downloads"
+ENV CHANNEL_FILE="conda-channel.tar.gz"
+ENV CHANNEL_DIR="/scratch/conda-channel"
+RUN --mount=type=cache,target=/var/cache/docker \
+sudo chmod -R 777 /var/cache && \
+    mkdir -p "${DOWNLOAD_DIR}" && \
+    if [[ ! -f "${DOWNLOAD_DIR}/${CHANNEL_FILE}" ]]; then \
+        wget -O "${DOWNLOAD_DIR}/${CHANNEL_FILE}" --progress=dot:mega ${VAI_CONDA_CHANNEL} && \
+        sudo chmod 555 "${DOWNLOAD_DIR}/${CHANNEL_FILE}"; \
+    fi && \
+    cd /scratch && \
+    tar -xzvf "${DOWNLOAD_DIR}/${CHANNEL_FILE}"; \
+    sudo chmod -R 555 "${CHANNEL_DIR}"
+ENV VAI_CONDA_CHANNEL="file://${CHANNEL_DIR}"
