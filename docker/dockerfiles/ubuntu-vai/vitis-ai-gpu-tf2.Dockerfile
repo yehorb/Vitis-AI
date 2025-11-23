@@ -31,15 +31,15 @@ ENV DOWNLOAD_DIR="/var/cache/docker/downloads"
 ENV CHANNEL_FILE="conda-channel.tar.gz"
 ENV CHANNEL_DIR="/scratch/conda-channel"
 RUN --mount=type=cache,target=/var/cache/docker \
-sudo chmod -R 777 /var/cache && \
-    mkdir -p "${DOWNLOAD_DIR}" && \
-    if [[ ! -f "${DOWNLOAD_DIR}/${CHANNEL_FILE}" ]]; then \
-        wget -O "${DOWNLOAD_DIR}/${CHANNEL_FILE}" --progress=dot:mega ${VAI_CONDA_CHANNEL} && \
-        sudo chmod 555 "${DOWNLOAD_DIR}/${CHANNEL_FILE}"; \
-    fi && \
-    cd /scratch && \
-    tar -xzvf "${DOWNLOAD_DIR}/${CHANNEL_FILE}"; \
-    sudo chmod -R 555 "${CHANNEL_DIR}"
+    sudo chmod -R 777 /var/cache/docker && \
+        mkdir -p "${DOWNLOAD_DIR}" && \
+        if [[ ! -f "${DOWNLOAD_DIR}/${CHANNEL_FILE}" ]]; then \
+            wget -O "${DOWNLOAD_DIR}/${CHANNEL_FILE}" --progress=dot:mega ${VAI_CONDA_CHANNEL} && \
+                sudo chmod 555 "${DOWNLOAD_DIR}/${CHANNEL_FILE}"; \
+        fi && \
+        cd /scratch && \
+        tar -xzvf "${DOWNLOAD_DIR}/${CHANNEL_FILE}" && \
+        sudo chmod -R 555 "${CHANNEL_DIR}"
 ENV VAI_CONDA_CHANNEL="file://${CHANNEL_DIR}"
 
 RUN \
