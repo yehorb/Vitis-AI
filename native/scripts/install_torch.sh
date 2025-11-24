@@ -17,22 +17,26 @@ download_vai_conda_channel() {
         "${VAI_CONDA_CHANNEL}"
 }
 
-install_vai_conda_channel() {
+unpack_vai_conda_channel() {
     mkdir -p "${channel_dir}"
     cd "${channel_dir}"
     tar -xzvf "${channel_file}"
 }
 
-if [[ ${VAI_CONDA_CHANNEL} =~ .*"tar.gz" ]]; then
-    if [[ ! -f "${channel_file}" ]]; then
+install_vai_conda_channel() {
+    if [[ ! -f ${channel_file} ]]; then
         download_vai_conda_channel
         # Read-only
         chmod a-w "${channel_file}"
     fi
-    if [[ ! -d "${channel_dir}" ]]; then
-        install_vai_conda_channel
+    if [[ ! -d ${channel_dir} ]]; then
+        unpack_vai_conda_channel
         chmod -R a-w "${channel_dir}"
     fi
+}
+
+if [[ ${VAI_CONDA_CHANNEL} =~ .*"tar.gz" ]]; then
+    install_vai_conda_channel
     export VAI_CONDA_CHANNEL="file://${channel_dir}"
 fi
 
