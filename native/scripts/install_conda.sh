@@ -2,8 +2,8 @@
 
 set -ex
 
-DOWNLOAD_DIR="${DOWNLOAD_DIR:-/tools/Xilinx/Downloads}"
 CONDA_PREFIX="${CONDA_PREFIX:-/home/xilinx}"
+DOWNLOAD_DIR="${DOWNLOAD_DIR:-/tools/Xilinx/Downloads}"
 MINIFORGE_VERSION="${MINIFORGE_VERSION:-"25.9.1-0"}"
 
 download_miniforge() {

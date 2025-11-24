@@ -2,13 +2,40 @@
 
 set -ex
 
-if [[ ${VAI_CONDA_CHANNEL} =~ .*"tar.gz" ]]; then
-    cd /scratch/
+CONDA_PREFIX="${CONDA_PREFIX:-/home/xilinx}"
+DOWNLOAD_DIR="${DOWNLOAD_DIR:-/tools/Xilinx/Downloads}"
+VAI_CONDA_CHANNEL="${VAI_CONDA_CHANNEL:-https://www.xilinx.com/bin/public/openDownload?filename=conda-channel-3.5.0.tar.gz}"
+VAI_CONDA_CHANNEL_NAME="${VAI_CONDA_CHANNEL_NAME}:-vitis-ai-conda-channel-3.5.0"
 
-    wget -O conda-channel.tar.gz --progress=dot:mega ${VAI_CONDA_CHANNEL}
-    tar -xzvf conda-channel.tar.gz
-    export VAI_CONDA_CHANNEL=file:///scratch/conda-channel
+local channel_tar_gz="${VAI_CONDA_CHANNEL_NAME}.tar.gz"
+local channel_file="${DOWNLOAD_DIR}/${channel_tar_gz}"
+local channel_dir="${CONDA_PREFIX}/channel/${VAI_CONDA_CHANNEL_NAME}"
+
+download_vai_conda_channel() {
+    wget --progress=dot:mega \
+        -O "${channel_file}" \
+        "${VAI_CONDA_CHANNEL}"
+}
+
+install_vai_conda_channel() {
+    mkdir -p "${channel_dir}"
+    cd "${channel_dir}"
+    tar -xzvf "${channel_file}"
+}
+
+if [[ ${VAI_CONDA_CHANNEL} =~ .*"tar.gz" ]]; then
+    if [[ ! -f "${channel_file}" ]]; then
+        download_vai_conda_channel
+        # Read-only
+        chmod a-w "${channel_file}"
+    fi
+    if [[ ! -d "${channel_dir}" ]]; then
+        install_vai_conda_channel
+        chmod -R a-w "${channel_dir}"
+    fi
+    export VAI_CONDA_CHANNEL="file://${channel_dir}"
 fi
+
 sudo chmod -R 777 /scratch/
 sudo ln -s /opt/conda $VAI_ROOT/conda
 
