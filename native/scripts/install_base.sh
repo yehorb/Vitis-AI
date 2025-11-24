@@ -3,17 +3,6 @@
 set -ex
 
 install_ubuntu() {
-    # NVIDIA dockers for RC releases use tag names like `11.0-cudnn8-devel-ubuntu18.04-rc`,
-    # for this case we will set UBUNTU_VERSION to `18.04-rc` so that the Dockerfile could
-    # find the correct image. As a result, here we have to check for
-    #   "$UBUNTU_VERSION" == "18.04"*
-    # instead of
-    #   "$UBUNTU_VERSION" == "18.04"
-    # TODO: Remove this once nvidia package repos are back online
-    # Comment out nvidia repositories to prevent them from getting apt-get updated, see https://github.com/pytorch/pytorch/issues/74968
-    # shellcheck disable=SC2046
-    sed -i 's/.*nvidia.*/# &/' $(find /etc/apt/ -type f -name "*.list")
-
     if [[ ${DOCKER_TYPE} =~ .*"rocm"* && ${TARGET_FRAMEWORK} =~ .*"pytorch" ]]; then
         echo "using rocm pytorch imge"
         apt-get update -y &&
@@ -136,24 +125,10 @@ install_ubuntu() {
         --slave /usr/bin/g++ g++ /usr/bin/g++-10 \
         --slave /usr/bin/gcov gcov /usr/bin/gcov-10
 
-    if [[ $? -ne 0 ]]; then
-        exit 1
-    fi
-
     apt-get install -y --no-install-recommends \
         python3-flask \
         python3-setuptools \
         python3-wheel
-
-    sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen &&
-        echo "LC_ALL=en_US.UTF-8" >>/etc/environment &&
-        echo "LANG=en_US.UTF-8" >/etc/locale.conf &&
-        locale-gen en_US.UTF-8 &&
-        localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8 &&
-        dpkg-reconfigure locales &&
-        ln -snf /usr/share/zoneinfo/$TZ /etc/localtime &&
-        echo $TZ >/etc/timezone &&
-        dpkg-reconfigure -f noninteractive tzdata
 
     export JSON_C_VERSION="json-c-0.18-20240915"
     cd /tmp && wget --progress=dot:mega https://github.com/json-c/json-c/archive/${JSON_C_VERSION}.tar.gz &&
@@ -164,22 +139,6 @@ install_ubuntu() {
         cmake -DBUILD_SHARED_LIBS=ON .. &&
         make -j &&
         make install
-
-    export GOSU_VERSION="1.19"
-    groupadd vitis-ai-group &&
-        useradd --shell /bin/bash -c '' -m -g vitis-ai-group vitis-ai-user &&
-        passwd -d vitis-ai-user &&
-        usermod -aG sudo vitis-ai-user &&
-        echo 'ALL ALL=(ALL) NOPASSWD:ALL' >>/etc/sudoers &&
-        echo 'Defaults secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/vitis_ai/conda/bin"' >>/etc/sudoers &&
-        curl -sSkLo /usr/local/bin/gosu "https://github.com/tianon/gosu/releases/download/$GOSU_VERSION/gosu-$(dpkg --print-architecture)" &&
-        chmod +x /usr/local/bin/gosu
-
-    mkdir -p ${VAI_ROOT} &&
-        chown -R vitis-ai-user:vitis-ai-group ${VAI_ROOT}
-
-    # Cleanup package manager
-    rm -rf /tmp/* /var/tmp/*
 }
 
 # Install base packages depending on the base OS
