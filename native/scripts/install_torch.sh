@@ -51,8 +51,6 @@ create_pytorch_env() {
     conda activate vitis-ai-pytorch
     $torchvision_cmd
     cp -r $CONDA_PREFIX/lib/python3.8/site-packages/vaic/arch $VAI_ROOT/compiler/arch
-    conda clean -y --force-pkgs-dirs
-    conda config --env --remove-key channels
 }
 
 install_torch() {
