@@ -71,15 +71,7 @@ install_base() {
         zstd
 }
 
-install_ubuntu() {
-    if [[ ${DOCKER_TYPE} =~ .*"rocm"* && ${TARGET_FRAMEWORK} =~ .*"pytorch" ]]; then
-        install_rocm_pytorch
-    elif [[ ${DOCKER_TYPE} =~ .*"rocm"* ]]; then
-        install_rocm
-    else
-        install_base
-    fi
-
+install_compilers() {
     apt-get update -y
     apt-get install -y --no-install-recommends \
         pybind11-dev \
@@ -91,6 +83,18 @@ install_ubuntu() {
         libprotobuf-c-dev \
         protobuf-compiler \
         swig
+}
+
+install_ubuntu() {
+    if [[ ${DOCKER_TYPE} =~ .*"rocm"* && ${TARGET_FRAMEWORK} =~ .*"pytorch" ]]; then
+        install_rocm_pytorch
+    elif [[ ${DOCKER_TYPE} =~ .*"rocm"* ]]; then
+        install_rocm
+    else
+        install_base
+    fi
+
+    install_compilers
 
     update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 10 \
         --slave /usr/bin/g++ g++ /usr/bin/g++-9 \
