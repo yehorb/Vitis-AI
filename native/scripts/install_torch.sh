@@ -4,7 +4,6 @@ set -ex
 
 CONDA_PREFIX="${CONDA_PREFIX:-/home/xilinx}"
 DOWNLOAD_DIR="${DOWNLOAD_DIR:-/tools/Xilinx/Downloads}"
-TORCH_CUDA_VERSION="${TORCH_CUDA_VERSION:-cu130}"
 VAI_CONDA_CHANNEL="${VAI_CONDA_CHANNEL:-https://www.xilinx.com/bin/public/openDownload?filename=conda-channel-3.5.0.tar.gz}"
 VAI_CONDA_CHANNEL_NAME="${VAI_CONDA_CHANNEL_NAME:-vitis-ai-conda-channel-3.5.0}"
 VAI_ROOT="${VAI_ROOT:-/tools/Xilinx/Vitis-AI}"
@@ -50,9 +49,6 @@ create_pytorch_env() {
         --yes
 
     conda activate vitis-ai-pytorch
-    conda activate vitis-ai-pytorch
-    torchvision_cmd="pip install torch==1.13.1+${TORCH_CUDA_VERSION} torchvision==0.14.1+${TORCH_CUDA_VERSION} --index-url https://download.pytorch.org/whl/${TORCH_CUDA_VERSION}"
-    $torchvision_cmd
 
     pip install \
         --force-reinstall \
@@ -70,6 +66,10 @@ create_pytorch_env() {
         fire \
         numba \
         loguru
+
+    # Required pytorch version installation instructions (https://pytorch.org/get-started/previous-versions/)
+    # CUDA 11.7 is the latest supported version for this release
+    conda install pytorch==1.13.1 torchvision==0.14.1 torchaudio==0.13.1 pytorch-cuda=11.7 -c pytorch -c nvidia --yes
 
     mkdir -p "${VAI_ROOT}/compiler"
     cp -r "${CONDA_PREFIX}/lib/python3.8/site-packages/vaic/arch" "${VAI_ROOT}/compiler/arch"
