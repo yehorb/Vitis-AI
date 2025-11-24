@@ -61,14 +61,6 @@ install_ubuntu() {
                 openssh-client \
                 openssl \
                 pocl-opencl-icd \
-                python3 \
-                python3-dev \
-                python3-minimal \
-                python3-numpy \
-                python3-opencv \
-                python3-pip \
-                python3-setuptools \
-                python3-venv \
                 software-properties-common \
                 sudo \
                 tree \
@@ -82,9 +74,17 @@ install_ubuntu() {
 
     os_version=$(lsb_release -r -s)
     echo "base OS version:${os_version}"
-    apt-get update -y && apt-get install -y --no-install-recommends \
-        pybind11-dev python3-pybind11 libopencv-dev gcc-9 gcc-10 g++-9 g++-10 \
-        libprotobuf-c-dev protobuf-compiler python3-protobuf swig
+    apt-get update -y &&
+        apt-get install -y --no-install-recommends \
+            pybind11-dev \
+            libopencv-dev \
+            gcc-9 \
+            gcc-10 \
+            g++-9 \
+            g++-10 \
+            libprotobuf-c-dev \
+            protobuf-compiler \
+            swig
 
     update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 10 \
         --slave /usr/bin/g++ g++ /usr/bin/g++-9 \
@@ -93,11 +93,6 @@ install_ubuntu() {
     update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 90 \
         --slave /usr/bin/g++ g++ /usr/bin/g++-10 \
         --slave /usr/bin/gcov gcov /usr/bin/gcov-10
-
-    apt-get install -y --no-install-recommends \
-        python3-flask \
-        python3-setuptools \
-        python3-wheel
 
     export JSON_C_VERSION="json-c-0.18-20240915"
     cd /tmp && wget --progress=dot:mega https://github.com/json-c/json-c/archive/${JSON_C_VERSION}.tar.gz &&
@@ -116,11 +111,11 @@ DOCKER_TYPE=$1
 TARGET_FRAMEWORK=$2
 
 case "$ID" in
-ubuntu)
-    install_ubuntu
-    ;;
-*)
-    echo "Unable to determine OS..."
-    exit 1
-    ;;
+    ubuntu)
+        install_ubuntu
+        ;;
+    *)
+        echo "Unable to determine OS..."
+        exit 1
+        ;;
 esac
