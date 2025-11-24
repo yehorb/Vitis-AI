@@ -43,7 +43,12 @@ create_pytorch_env() {
     source "${CONDA_PREFIX}/conda/etc/profile.d/mamba.sh"
     set -x
 
-    mamba env create -v -f "${VAI_ROOT}/native/gpu_conda/vitis-ai-pytorch.yml"
+    mamba create \
+        --channel "${VAI_CONDA_CHANNEL}" \
+        --file "${VAI_ROOT}/native/gpu_conda/vitis-ai-pytorch.yml" \
+        --verbose \
+        --yes
+
     conda activate vitis-ai-pytorch
     pip install --force-reinstall scipy numpy==1.22 protobuf==3.20.3 tensorboard graphviz==0.19.1 imageio scikit-image natsort nibabel easydict yacs fire numba loguru
     mkdir -p $VAI_ROOT/compiler
