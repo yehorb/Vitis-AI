@@ -81,3 +81,8 @@ These adjustments keep the native install lean while staying functionally equiva
 - **Temporary storage**: use `mktemp` or user directories instead of `/scratch` if you prefer not to modify system-wide paths.
 
 Following the flow above reproduces the PyTorch and TensorFlow 2 GPU environments from the Vitis AI Docker builds on a standard Ubuntu machine using only public documentation and artifacts.
+
+## Installation instructions (draft)
+
+- `sudo ./native/scripts/install_base.sh install_base`
+- `sudo ./native/scripts/install_base.sh install_compilers`
