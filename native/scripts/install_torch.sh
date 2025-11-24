@@ -7,6 +7,7 @@ DOWNLOAD_DIR="${DOWNLOAD_DIR:-/tools/Xilinx/Downloads}"
 TORCH_CUDA_VERSION="${TORCH_CUDA_VERSION:-cu130}"
 VAI_CONDA_CHANNEL="${VAI_CONDA_CHANNEL:-https://www.xilinx.com/bin/public/openDownload?filename=conda-channel-3.5.0.tar.gz}"
 VAI_CONDA_CHANNEL_NAME="${VAI_CONDA_CHANNEL_NAME}:-vitis-ai-conda-channel-3.5.0"
+VAI_ROOT="${VAI_ROOT:-/tools/Xilinx/Vitis-AI}"
 
 local channel_tar_gz="${VAI_CONDA_CHANNEL_NAME}.tar.gz"
 local channel_file="${DOWNLOAD_DIR}/${channel_tar_gz}"
@@ -41,8 +42,13 @@ if [[ ${VAI_CONDA_CHANNEL} =~ .*"tar.gz" ]]; then
     export VAI_CONDA_CHANNEL="file://${channel_dir}"
 fi
 
+set +x
+source "${CONDA_PREFIX}/conda/etc/profile.d/conda.sh"
+source "${CONDA_PREFIX}/conda/etc/profile.d/mamba.sh"
+set -x
+
 torchvision_cmd="pip install torch==1.13.1+${TORCH_CUDA_VERSION} torchvision==0.14.1+${TORCH_CUDA_VERSION} --index-url https://download.pytorch.org/whl/${TORCH_CUDA_VERSION}"
-mamba env create -v -f /scratch/${DOCKER_TYPE}_conda/vitis-ai-pytorch.yml
+mamba env create -v -f "${VAI_ROOT}/native/gpu_conda/vitis-ai-pytorch.yml"
 conda activate vitis-ai-pytorch
 pip install --force-reinstall scipy numpy==1.22 protobuf==3.20.3 tensorboard graphviz==0.19.1 imageio scikit-image natsort nibabel easydict yacs fire numba loguru
 mkdir -p $VAI_ROOT/compiler

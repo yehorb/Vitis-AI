@@ -33,6 +33,7 @@ activate_conda() {
     set +x
     source "${CONDA_PREFIX}/conda/etc/profile.d/conda.sh"
     source "${CONDA_PREFIX}/conda/etc/profile.d/mamba.sh"
+    set -x
 }
 
 "$@"
