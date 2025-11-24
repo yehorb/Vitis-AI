@@ -84,6 +84,8 @@ Following the flow above reproduces the PyTorch and TensorFlow 2 GPU environment
 
 ## Installation instructions (draft)
 
+Following instructions assume that *this* repository is cloned to `/tools/Xilinx/Vitis-AI`. Most options are configurable, but it is the default expected location.
+
 - `sudo ./native/scripts/install_base.sh install_base`
 - `sudo ./native/scripts/install_base.sh install_compilers`
 - `sudo -u xilinx ./native/scripts/install_conda.sh install_conda`
