@@ -52,8 +52,8 @@ create_pytorch_env() {
 
     pip install \
         --force-reinstall \
-        scipy \
-        numpy==1.22 \
+        scipy\<=1.9.3 \
+        numpy\<=1.24.2 \
         protobuf==3.20.3 \
         tensorboard \
         graphviz==0.19.1 \
@@ -65,7 +65,8 @@ create_pytorch_env() {
         yacs \
         fire \
         numba \
-        loguru
+        loguru \
+        ninja
 
     # pytorch==1.13.1 is pinned by vitis-ai
     # From pytorch previous version installation instructions
