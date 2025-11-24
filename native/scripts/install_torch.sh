@@ -47,7 +47,7 @@ fi
     sudo conda config --env --remove-key channels || true &&
     sudo conda config --env --append channels ${VAI_CONDA_CHANNEL}
 
-torchvision_cmd="pip install --force-reinstall torch==1.13.1+${TORCH_CUDA_VERSION} torchvision==0.14.1+${TORCH_CUDA_VERSION} --extra-index-url https://download.pytorch.org/whl/${TORCH_CUDA_VERSION}"
+torchvision_cmd="pip install torch==1.13.1+${TORCH_CUDA_VERSION} torchvision==0.14.1+${TORCH_CUDA_VERSION} --index-url https://download.pytorch.org/whl/${TORCH_CUDA_VERSION}"
 
 . $VAI_ROOT/conda/etc/profile.d/conda.sh &&
     mkdir -p $VAI_ROOT/conda/pkgs &&
