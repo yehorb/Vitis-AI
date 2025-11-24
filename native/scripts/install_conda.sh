@@ -29,6 +29,8 @@ install_conda() {
 }
 
 activate_conda() {
+    # Stop printing commands
+    set +x
     source "${CONDA_PREFIX}/conda/etc/profile.d/conda.sh"
     source "${CONDA_PREFIX}/conda/etc/profile.d/mamba.sh"
 }
