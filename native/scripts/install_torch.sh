@@ -43,12 +43,12 @@ create_pytorch_env() {
     source "${CONDA_PREFIX}/conda/etc/profile.d/mamba.sh"
     set -x
 
-    torchvision_cmd="pip install torch==1.13.1+${TORCH_CUDA_VERSION} torchvision==0.14.1+${TORCH_CUDA_VERSION} --index-url https://download.pytorch.org/whl/${TORCH_CUDA_VERSION}"
     mamba env create -v -f "${VAI_ROOT}/native/gpu_conda/vitis-ai-pytorch.yml"
     conda activate vitis-ai-pytorch
     pip install --force-reinstall scipy numpy==1.22 protobuf==3.20.3 tensorboard graphviz==0.19.1 imageio scikit-image natsort nibabel easydict yacs fire numba loguru
     mkdir -p $VAI_ROOT/compiler
     conda activate vitis-ai-pytorch
+    torchvision_cmd="pip install torch==1.13.1+${TORCH_CUDA_VERSION} torchvision==0.14.1+${TORCH_CUDA_VERSION} --index-url https://download.pytorch.org/whl/${TORCH_CUDA_VERSION}"
     $torchvision_cmd
     cp -r $CONDA_PREFIX/lib/python3.8/site-packages/vaic/arch $VAI_ROOT/compiler/arch
 }
