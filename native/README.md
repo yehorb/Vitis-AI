@@ -90,3 +90,4 @@ Following instructions assume that *this* repository is cloned to `/tools/Xilinx
 - `sudo ./native/scripts/install_base.sh install_compilers`
 - `sudo -u xilinx ./native/scripts/install_conda.sh install_conda`
   - Assuming you created `xilinx` user and want to install to `/home/xilinx/conda`
+- `sudo -u xilinx ./native/scripts/install_torch.sh install_vai_conda_channel`
