@@ -2,89 +2,98 @@
 
 set -ex
 
+install_rocm_pytorch() {
+    apt-get update -y
+    apt-get install -y --no-install-recommends locales
+
+}
+
+install_rocm() {
+    apt-get update -y
+    apt-get install -y --no-install-recommends wget rccl lsb-release
+}
+
+install_base() {
+    chmod 1777 /tmp &&
+        mkdir /scratch &&
+        chmod 1777 /scratch
+
+    apt-get update -y
+    apt-get install -y --no-install-recommends \
+        apt-transport-https \
+        autoconf \
+        automake \
+        bc \
+        build-essential \
+        bzip2 \
+        ca-certificates \
+        cmake \
+        curl \
+        ffmpeg \
+        g++ \
+        gdb \
+        git \
+        gnupg \
+        libavcodec-dev \
+        libavformat-dev \
+        libboost-all-dev \
+        libeigen3-dev \
+        libgflags-dev \
+        libgoogle-glog-dev \
+        libgstreamer-plugins-base1.0-dev \
+        libgstreamer1.0-dev \
+        libgtest-dev \
+        libgtk-3-dev \
+        libgtk2.0-dev \
+        libhdf5-dev \
+        libjpeg-dev \
+        libjsoncpp-dev \
+        libopenexr-dev \
+        libpng-dev \
+        libssl-dev \
+        libswscale-dev \
+        libtiff-dev \
+        libtool \
+        libunwind-dev \
+        libwebp-dev \
+        locales \
+        make \
+        opencl-clhpp-headers \
+        opencl-headers \
+        openssh-client \
+        openssl \
+        pocl-opencl-icd \
+        software-properties-common \
+        sudo \
+        tree \
+        tzdata \
+        unzip \
+        vim \
+        wget \
+        yasm \
+        zstd
+}
+
 install_ubuntu() {
     if [[ ${DOCKER_TYPE} =~ .*"rocm"* && ${TARGET_FRAMEWORK} =~ .*"pytorch" ]]; then
-        echo "using rocm pytorch imge"
-        apt-get update -y &&
-            apt-get install -y --no-install-recommends locales
-
+        install_rocm_pytorch
     elif [[ ${DOCKER_TYPE} =~ .*"rocm"* ]]; then
-        apt-get update -y &&
-            apt-get install -y wget rccl lsb-release
-
+        install_rocm
     else
-        chmod 1777 /tmp &&
-            mkdir /scratch &&
-            chmod 1777 /scratch &&
-            apt-get update -y &&
-            apt-get install -y --no-install-recommends \
-                apt-transport-https \
-                autoconf \
-                automake \
-                bc \
-                build-essential \
-                bzip2 \
-                ca-certificates \
-                cmake \
-                curl \
-                ffmpeg \
-                g++ \
-                gdb \
-                git \
-                gnupg \
-                libavcodec-dev \
-                libavformat-dev \
-                libboost-all-dev \
-                libeigen3-dev \
-                libgflags-dev \
-                libgoogle-glog-dev \
-                libgstreamer-plugins-base1.0-dev \
-                libgstreamer1.0-dev \
-                libgtest-dev \
-                libgtk-3-dev \
-                libgtk2.0-dev \
-                libhdf5-dev \
-                libjpeg-dev \
-                libjsoncpp-dev \
-                libopenexr-dev \
-                libpng-dev \
-                libssl-dev \
-                libswscale-dev \
-                libtiff-dev \
-                libtool \
-                libunwind-dev \
-                libwebp-dev \
-                locales \
-                make \
-                opencl-clhpp-headers \
-                opencl-headers \
-                openssh-client \
-                openssl \
-                pocl-opencl-icd \
-                software-properties-common \
-                sudo \
-                tree \
-                tzdata \
-                unzip \
-                vim \
-                wget \
-                yasm \
-                zstd
+        install_base
     fi
 
-    os_version=$(lsb_release -r -s)
-    echo "base OS version:${os_version}"
-    apt-get update -y &&
-        apt-get install -y --no-install-recommends \
-            pybind11-dev \
-            libopencv-dev \
-            gcc-9 \
-            gcc-10 \
-            g++-9 \
-            g++-10 \
-            libprotobuf-c-dev \
-            protobuf-compiler \
-            swig
+    apt-get update -y
+    apt-get install -y --no-install-recommends \
+        pybind11-dev \
+        libopencv-dev \
+        gcc-9 \
+        gcc-10 \
+        g++-9 \
+        g++-10 \
+        libprotobuf-c-dev \
+        protobuf-compiler \
+        swig
 
     update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 10 \
         --slave /usr/bin/g++ g++ /usr/bin/g++-9 \
