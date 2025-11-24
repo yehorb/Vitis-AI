@@ -59,7 +59,7 @@ install_torch() {
     if [[ ${VAI_CONDA_CHANNEL} =~ .*"tar.gz" ]]; then
         install_vai_conda_channel
     fi
-    export VAI_CONDA_CHANNEL="file://${channel_dir}"
+    export VAI_CONDA_CHANNEL="file://${channel_dir}/conda-channel"
 }
 
 "$@"
