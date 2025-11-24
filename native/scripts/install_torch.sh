@@ -80,6 +80,7 @@ install_torch() {
         install_vai_conda_channel
     fi
     export VAI_CONDA_CHANNEL="file://${channel_dir}/conda-channel"
+    create_pytorch_env
 }
 
 "$@"
