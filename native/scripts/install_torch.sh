@@ -4,6 +4,7 @@ set -ex
 
 CONDA_PREFIX="${CONDA_PREFIX:-/home/xilinx}"
 DOWNLOAD_DIR="${DOWNLOAD_DIR:-/tools/Xilinx/Downloads}"
+TORCH_CUDA_VERSION="${TORCH_CUDA_VERSION:-cu130}"
 VAI_CONDA_CHANNEL="${VAI_CONDA_CHANNEL:-https://www.xilinx.com/bin/public/openDownload?filename=conda-channel-3.5.0.tar.gz}"
 VAI_CONDA_CHANNEL_NAME="${VAI_CONDA_CHANNEL_NAME}:-vitis-ai-conda-channel-3.5.0"
 
@@ -46,7 +47,7 @@ fi
     sudo conda config --env --remove-key channels || true &&
     sudo conda config --env --append channels ${VAI_CONDA_CHANNEL}
 
-torchvision_cmd=" pip install --force-reinstall  torch==1.13.1+cu117 torchvision==0.14.1+cu117 --extra-index-url https://download.pytorch.org/whl/cu117 "
+torchvision_cmd="pip install --force-reinstall torch==1.13.1+${TORCH_CUDA_VERSION} torchvision==0.14.1+${TORCH_CUDA_VERSION} --extra-index-url https://download.pytorch.org/whl/${TORCH_CUDA_VERSION}"
 
 . $VAI_ROOT/conda/etc/profile.d/conda.sh &&
     mkdir -p $VAI_ROOT/conda/pkgs &&
