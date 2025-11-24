@@ -86,3 +86,5 @@ Following the flow above reproduces the PyTorch and TensorFlow 2 GPU environment
 
 - `sudo ./native/scripts/install_base.sh install_base`
 - `sudo ./native/scripts/install_base.sh install_compilers`
+- `sudo -u xilinx ./native/scripts/install_conda.sh install_conda`
+  - Assuming you created `xilinx` user and want to install to `/home/xilinx/conda`
