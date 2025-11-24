@@ -14,10 +14,6 @@ install_rocm() {
 }
 
 install_base() {
-    chmod 1777 /tmp &&
-        mkdir /scratch &&
-        chmod 1777 /scratch
-
     apt-get update -y
     apt-get install -y --no-install-recommends \
         apt-transport-https \
