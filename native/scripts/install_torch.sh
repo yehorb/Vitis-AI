@@ -58,8 +58,8 @@ create_pytorch_env() {
 install_torch() {
     if [[ ${VAI_CONDA_CHANNEL} =~ .*"tar.gz" ]]; then
         install_vai_conda_channel
-        export VAI_CONDA_CHANNEL="file://${channel_dir}"
     fi
+    export VAI_CONDA_CHANNEL="file://${channel_dir}"
 }
 
 "$@"
