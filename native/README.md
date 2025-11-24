@@ -91,3 +91,4 @@ Following instructions assume that *this* repository is cloned to `/tools/Xilinx
 - `sudo -u xilinx ./native/scripts/install_conda.sh install_conda`
   - Assuming you created `xilinx` user and want to install to `/home/xilinx/conda`
 - `sudo -u xilinx ./native/scripts/install_torch.sh install_vai_conda_channel`
+  - Install and protect Vitis-AI `conda` channel using `xilinx` user
