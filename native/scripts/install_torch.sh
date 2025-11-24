@@ -67,9 +67,15 @@ create_pytorch_env() {
         numba \
         loguru
 
-    # Required pytorch version installation instructions (https://pytorch.org/get-started/previous-versions/)
+    # pytorch==1.13.1 is pinned by vitis-ai
+    # From pytorch previous version installation instructions
+    # https://pytorch.org/get-started/previous-versions/
     # CUDA 11.7 is the latest supported version for this release
     conda install pytorch==1.13.1 torchvision==0.14.1 torchaudio==0.13.1 pytorch-cuda=11.7 -c pytorch -c nvidia --yes
+
+    # Ensure compatible mkl version
+    # https://github.com/pytorch/pytorch/issues/123097
+    conda install mkl==2024.0.0 --yes
 
     mkdir -p "${VAI_ROOT}/compiler"
     cp -r "${CONDA_PREFIX}/lib/python3.8/site-packages/vaic/arch" "${VAI_ROOT}/compiler/arch"
