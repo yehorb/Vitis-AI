@@ -50,11 +50,9 @@ create_pytorch_env() {
         --yes
 
     conda activate vitis-ai-pytorch
-    mkdir -p $VAI_ROOT/compiler
     conda activate vitis-ai-pytorch
     torchvision_cmd="pip install torch==1.13.1+${TORCH_CUDA_VERSION} torchvision==0.14.1+${TORCH_CUDA_VERSION} --index-url https://download.pytorch.org/whl/${TORCH_CUDA_VERSION}"
     $torchvision_cmd
-    cp -r $CONDA_PREFIX/lib/python3.8/site-packages/vaic/arch $VAI_ROOT/compiler/arch
 
     pip install \
         --force-reinstall \
@@ -72,6 +70,9 @@ create_pytorch_env() {
         fire \
         numba \
         loguru
+
+    mkdir -p "${VAI_ROOT}/compiler"
+    cp -r "${CONDA_PREFIX}/lib/python3.8/site-packages/vaic/arch" "${VAI_ROOT}/compiler/arch"
 }
 
 install_torch() {
