@@ -43,6 +43,7 @@ install_base() {
         libgtk2.0-dev \
         libhdf5-dev \
         libjpeg-dev \
+        libjson-c-dev \
         libjsoncpp-dev \
         libopenexr-dev \
         libpng-dev \
@@ -98,16 +99,6 @@ install_ubuntu() {
     update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 90 \
         --slave /usr/bin/g++ g++ /usr/bin/g++-10 \
         --slave /usr/bin/gcov gcov /usr/bin/gcov-10
-
-    export JSON_C_VERSION="json-c-0.18-20240915"
-    cd /tmp && wget --progress=dot:mega https://github.com/json-c/json-c/archive/${JSON_C_VERSION}.tar.gz &&
-        tar xvf ${JSON_C_VERSION}.tar.gz &&
-        cd json-c-${JSON_C_VERSION} &&
-        mkdir build &&
-        cd build &&
-        cmake -DBUILD_SHARED_LIBS=ON .. &&
-        make -j &&
-        make install
 }
 
 # Install base packages depending on the base OS
