@@ -2,6 +2,9 @@
 
 set -ex
 
+DOCKER_TYPE="${DOCKER_TYPE:-gpu}"
+TARGET_FRAMEWORK="${TARGET_FRAMEWORK:-pytorch}"
+
 install_rocm_pytorch() {
     apt-get update -y
     apt-get install -y --no-install-recommends locales
@@ -109,17 +112,4 @@ install_ubuntu() {
     update_alternatives_compilers
 }
 
-# Install base packages depending on the base OS
-ID=$(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"')
-DOCKER_TYPE=$1
-TARGET_FRAMEWORK=$2
-
-case "$ID" in
-    ubuntu)
-        install_ubuntu
-        ;;
-    *)
-        echo "Unable to determine OS..."
-        exit 1
-        ;;
-esac
+"$@"
