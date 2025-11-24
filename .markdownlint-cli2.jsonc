@@ -1,0 +1,14 @@
+{
+  "config": {
+    "MD033": {
+      // div for page breaks
+      // h3 for long headings
+      "allowed_elements": ["div", "h3"]
+    },
+    // Trying out soft-wrapping for markdown
+    "MD013": false,
+    "no-duplicate-heading": {
+        "siblings_only": true
+    }
+  }
+}
