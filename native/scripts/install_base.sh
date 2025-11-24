@@ -25,24 +25,42 @@ install_ubuntu() {
                 build-essential \
                 bzip2 \
                 ca-certificates \
+                cmake \
                 curl \
+                ffmpeg \
                 g++ \
                 gdb \
                 git \
                 gnupg \
-                locales \
+                libavcodec-dev \
+                libavformat-dev \
                 libboost-all-dev \
+                libeigen3-dev \
                 libgflags-dev \
                 libgoogle-glog-dev \
+                libgstreamer-plugins-base1.0-dev \
+                libgstreamer1.0-dev \
                 libgtest-dev \
+                libgtk-3-dev \
+                libgtk2.0-dev \
+                libhdf5-dev \
+                libjpeg-dev \
                 libjsoncpp-dev \
+                libopenexr-dev \
+                libpng-dev \
                 libssl-dev \
+                libswscale-dev \
+                libtiff-dev \
                 libtool \
                 libunwind-dev \
+                libwebp-dev \
+                locales \
                 make \
-                cmake \
+                opencl-clhpp-headers \
+                opencl-headers \
                 openssh-client \
                 openssl \
+                pocl-opencl-icd \
                 python3 \
                 python3-dev \
                 python3-minimal \
@@ -59,56 +77,7 @@ install_ubuntu() {
                 vim \
                 wget \
                 yasm \
-                zstd \
-                libavcodec-dev \
-                libavformat-dev \
-                libeigen3-dev \
-                libgstreamer-plugins-base1.0-dev \
-                libgstreamer1.0-dev \
-                libgtest-dev \
-                libgtk-3-dev \
-                libgtk2.0-dev \
-                libhdf5-dev \
-                libjpeg-dev \
-                libopenexr-dev \
-                libpng-dev \
-                libswscale-dev \
-                libtiff-dev \
-                libwebp-dev \
-                opencl-clhpp-headers \
-                opencl-headers \
-                pocl-opencl-icd \
-                python3-opencv \
-                python3-pip \
-                python3-setuptools \
-                python3-venv \
-                software-properties-common \
-                sudo \
-                tree \
-                unzip \
-                vim \
-                wget \
-                yasm \
-                zstd \
-                libavcodec-dev \
-                libavformat-dev \
-                libeigen3-dev \
-                libgstreamer-plugins-base1.0-dev \
-                libgstreamer1.0-dev \
-                libgtest-dev \
-                libgtk-3-dev \
-                libgtk2.0-dev \
-                libhdf5-dev \
-                libjpeg-dev \
-                libopenexr-dev \
-                libpng-dev \
-                libswscale-dev \
-                libtiff-dev \
-                libwebp-dev \
-                opencl-clhpp-headers \
-                opencl-headers \
-                ffmpeg \
-                pocl-opencl-icd
+                zstd
     fi
 
     os_version=$(lsb_release -r -s)
