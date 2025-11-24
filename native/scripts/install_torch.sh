@@ -6,7 +6,7 @@ CONDA_PREFIX="${CONDA_PREFIX:-/home/xilinx}"
 DOWNLOAD_DIR="${DOWNLOAD_DIR:-/tools/Xilinx/Downloads}"
 TORCH_CUDA_VERSION="${TORCH_CUDA_VERSION:-cu130}"
 VAI_CONDA_CHANNEL="${VAI_CONDA_CHANNEL:-https://www.xilinx.com/bin/public/openDownload?filename=conda-channel-3.5.0.tar.gz}"
-VAI_CONDA_CHANNEL_NAME="${VAI_CONDA_CHANNEL_NAME}:-vitis-ai-conda-channel-3.5.0"
+VAI_CONDA_CHANNEL_NAME="${VAI_CONDA_CHANNEL_NAME:-vitis-ai-conda-channel-3.5.0}"
 VAI_ROOT="${VAI_ROOT:-/tools/Xilinx/Vitis-AI}"
 
 local channel_tar_gz="${VAI_CONDA_CHANNEL_NAME}.tar.gz"
