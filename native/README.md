@@ -59,8 +59,51 @@ Each step below is independent and can be turned into its own script/target. The
    - Optional validation: `python -c "import tensorflow as tf; print(tf.__version__, tf.test.is_built_with_cuda(), tf.config.list_physical_devices('GPU'))"`.
 
 6. **Optional runtime components**
-   - **XRT/XRM**: download the `.deb` files referenced by `XRT_URL` and `XRM_URL`, install via `sudo apt install ./xrt.deb ./xrm.deb`.
-   - **Vitis AI runtime**: either unpack `VAI_DEB_CHANNEL` tarball and `apt install` all contained `.deb`s, or add the repo and install `libunilog`, `libtarget-factory`, `libxir`, `libvart`, `libvitis_ai_library`, `librt-engine`, `aks`. Re-run `sudo ldconfig` and adjust `libvart-dpu-runner.so` symlink if needed.
+
+   ### XRT (Xilinx Runtime)
+
+   If you have a full Vitis installation, XRT is already bundled. **Do not install separate XRT/XRM packages.**
+
+   **Vitis 2025.2 XRT locations:**
+
+   ```bash
+   /tools/Xilinx/2025.2/Vitis/bin/xrt_server
+   ```
+
+   **Activate XRT from Vitis:**
+
+   ```bash
+   source /tools/Xilinx/2025.2/Vitis/settings64.sh
+   ```
+
+   Platform-specific XRT is also available under base platforms:
+
+   ```bash
+   /tools/Xilinx/2025.2/Vitis/base_platforms/xilinx_vek280_base_202510_1/sw/xrt
+   /tools/Xilinx/2025.2/Vitis/base_platforms/xilinx_vck190_base_202510_1/sw/xrt
+   /tools/Xilinx/2025.2/Vitis/base_platforms/xilinx_kv260_base_202510_1/sw/xrt
+   ```
+
+   ### XRM (Xilinx Resource Manager)
+
+   XRM is optional and only required for multi-card or multi-user FPGA resource management. Most single-user development setups do not need it.
+
+   ### Vitis AI Runtime Libraries
+
+   The Vitis AI-specific libraries (`libxir`, `libvart`, `libunilog`, `libtarget-factory`, `libvitis_ai_library`, `librt-engine`) are **not** included in base Vitis/XRT. If your workflow requires on-host DPU deployment or inference, install these from the `vairuntime` tarball:
+
+   ```bash
+   ./native/scripts/install_vairuntime.sh install_vairuntime
+   ```
+
+   ### When to Skip Runtime Installation
+
+   If your native host is used purely for:
+   - Model training (PyTorch/TensorFlow 2 on NVIDIA GPU)
+   - Model quantization (`vai_q_pytorch`, `vai_q_tensorflow`)
+   - Model compilation (`vaic`/`xcompiler`)
+
+   Then you do **not** need XRT, XRM, or Vitis AI runtime libraries on this host. These are only required for deploying and running inference on Xilinx FPGA/DPU targets.
 
 7. **Cleanup (optional)**
    - Run `conda clean -y --force-pkgs-dirs` in each environment.
