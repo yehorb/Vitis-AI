@@ -4,7 +4,7 @@ clear; clc;
 run_id = datestr(now,'yyyymmdd_HHMMSS');  % e.g., 20250928_231045
 
 % ------------------------- DATASET PATHS -------------------------
-ds.root        = "dataset" + run_id;
+ds.root        = "../../build/dataset/" + run_id;
 ds.images_dir  = fullfile(ds.root, 'images_tiles');
 ds.ann_dir     = fullfile(ds.root, 'ann_tiles');
 ds.splits_dir  = fullfile(ds.root, 'splits');
