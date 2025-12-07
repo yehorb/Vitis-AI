@@ -272,7 +272,7 @@ for k = 1:n_tiles
     h5write(ds.h5_path, dset_S, SdBk);
 
     if isempty(boxes_for_h5), boxes_mat = int32(zeros(0,4));
-    else,                    boxes_mat = int32(boxes_for_h5);
+    else,                     boxes_mat = int32(boxes_for_h5);
     end
     h5create_safe(ds.h5_path, dset_B, size(boxes_mat), 'int32', [max(1,size(boxes_mat,1)), 4], 1);
     if ~isempty(boxes_mat)
