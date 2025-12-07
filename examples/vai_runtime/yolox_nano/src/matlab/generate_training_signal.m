@@ -313,6 +313,9 @@ write_list(fullfile(ds.splits_dir, 'val.txt'),   val_ids);
 write_list(fullfile(ds.splits_dir, 'test.txt'),  test_ids);
 
 % ------------------------- FULL-STFT FIGS (.fig + .png) ---------
+save_figures = false;
+
+if save_figures
 SdB_disp = min(max(double(SdB), vmin), vmax);
 set(0,'DefaultFigureVisible','on');
 
@@ -334,6 +337,7 @@ saveas(f2, fullfile(ds.fig_dir,'stft_full_boxes.png'));
 
 fprintf('Done. Tiles=%d | train=%d val=%d test=%d | overlap=%d (%s) | run_id=%s\n', ...
     N, numel(train_ids), numel(val_ids), numel(test_ids), overlap.enable, overlap.mode, run_id);
+end
 
 % ------------------------- HELPERS -------------------------------
 function write_list(path, arr)
