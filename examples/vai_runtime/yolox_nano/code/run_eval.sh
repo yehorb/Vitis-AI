@@ -19,5 +19,5 @@ GPU_NUM=1
 export LD_LIBRARY_PATH=${PWD}/code:${LD_LIBRARY_PATH}
 BATCH=32
 CFG=code/exps/example/custom/yolox_nano_deploy_relu.py
-CKPT=float/yolox_nano.pth
+CKPT=build/float/yolox_nano.pth
 python -m yolox.tools.eval -f ${CFG} -c ${CKPT} -b ${BATCH} -d ${GPU_NUM} --conf 0.001
