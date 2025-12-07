@@ -63,10 +63,12 @@ class StftDataset(Dataset):
 
         # --- Spectrogram tile: float32 [H, W] ---
         s_db: npt.NDArray[np.float32] = h5[f"/S_db/{tile_id}"][...]
+        s_db = s_db.T
 
         # --- Boxes: int32 [N, 4] (x0, y0, w, h) ---
         if f"/boxes/{tile_id}" in h5:
             boxes_np: npt.NDArray[np.int32] = h5[f"/boxes/{tile_id}"][...]
+            boxes_np = boxes_np.T
         else:
             boxes_np = np.zeros((0, 4), dtype=np.int32)
 
