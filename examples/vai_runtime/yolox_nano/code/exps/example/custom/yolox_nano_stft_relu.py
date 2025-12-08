@@ -153,13 +153,13 @@ class Exp(MyExp):
 
         # Create dataloader (no shuffle for validation)
         val_loader = StftDataLoader(
-            dataset,
+            dataset=dataset,
+            max_labels=50,
             batch_size=batch_size,
             shuffle=False,
             num_workers=self.data_num_workers,
             pin_memory=True,
             drop_last=False,
-            max_labels=50,
         )
 
         return val_loader
