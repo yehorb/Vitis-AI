@@ -10,8 +10,8 @@ Uses ReLU activation for DPU deployment compatibility.
 import os
 import pathlib
 
+import torch.distributed as dist
 import torch.nn as nn
-
 from yolox.exp import Exp as MyExp
 
 
@@ -103,9 +103,10 @@ class Exp(MyExp):
     def get_data_loader(
         self, batch_size, is_distributed, no_aug=False, cache_img=False
     ):
-        from stft_dataset import Matlab, LoadSplit, StftDataset
+        from stft_dataset import LoadSplit, Matlab, StftDataset
         from stft_dataset.loader import StftDataLoader
         from stft_dataset.normalization import Normalize, load_normalization_params
+        from yolox.data import InfiniteSampler
 
         # Load normalization parameters
         vmin_db, vmax_db = load_normalization_params(self.meta_path)
@@ -117,21 +118,26 @@ class Exp(MyExp):
             vmax_db,
         )
 
+        if is_distributed:
+            batch_size = batch_size // dist.get_world_size()
+
+        sampler = InfiniteSampler(len(dataset), seed=self.seed if self.seed else 0)
+
         # Create dataloader
         train_loader = StftDataLoader(
-            dataset,
+            dataset=dataset,
             batch_size=batch_size,
-            shuffle=True,
             num_workers=self.data_num_workers,
             pin_memory=True,
             drop_last=True,
             max_labels=50,
+            sampler=sampler,
         )
 
         return train_loader
 
     def get_eval_loader(self, batch_size, is_distributed, testdev=False, legacy=False):
-        from stft_dataset import Matlab, LoadSplit, StftDataset
+        from stft_dataset import LoadSplit, Matlab, StftDataset
         from stft_dataset.loader import StftDataLoader
         from stft_dataset.normalization import Normalize, load_normalization_params
 
