@@ -10,7 +10,7 @@ if t.TYPE_CHECKING:
 
 
 def visualize_stft_sample(
-    sample: stft_dataset.DataPoint,
+    sample: stft_dataset.YoloxDataPoint,
     vmin: float | None = None,
     vmax: float | None = None,
     cmap: str = "magma",
