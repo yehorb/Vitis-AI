@@ -160,7 +160,11 @@ def main(exp, args, num_gpu):
         args.batch_size = 1
 
     model = exp.get_model()
-    logger.info("Model Summary: {}".format(get_model_info(model, exp.test_size)))
+    logger.info(
+        "Model Summary: {}".format(
+            get_model_info(model, exp.test_size, getattr(exp, "input_channels", 3))
+        )
+    )
     logger.info("Model Structure:\n{}".format(str(model)))
 
     evaluator = exp.get_evaluator(args.batch_size, is_distributed, args.test, args.legacy)
