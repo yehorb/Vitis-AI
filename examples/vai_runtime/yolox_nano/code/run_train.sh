@@ -13,9 +13,9 @@
 # limitations under the License.
 
 echo "Conducting training..."
-export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
-GPU_NUM=8
-BATCH=256
+export CUDA_VISIBLE_DEVICES=0
+GPU_NUM=1
+BATCH=8
 
-CFG=code/exps/example/custom/yolox_nano_deploy_relu.py
+CFG=code/exps/example/custom/yolox_nano_stft_relu.py
 python -m yolox.tools.train -f ${CFG} -d ${GPU_NUM} -b ${BATCH} -o
