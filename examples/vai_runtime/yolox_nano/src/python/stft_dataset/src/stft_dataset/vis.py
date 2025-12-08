@@ -6,13 +6,11 @@ import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 
 if t.TYPE_CHECKING:
-    import numpy as np
-    import numpy.typing as npt
-    from torch import Tensor
+    import stft_dataset
 
 
 def visualize_stft_sample(
-    sample: t.Tuple[Tensor, Tensor, str],
+    sample: stft_dataset.DataPoint,
     vmin: float | None = None,
     vmax: float | None = None,
     cmap: str = "magma",
@@ -32,11 +30,7 @@ def visualize_stft_sample(
     cmap :
         Matplotlib colormap name.
     """
-    spec, boxes, tile_id = sample
-
-    # Move to CPU + numpy
-    spec_np: npt.NDArray[np.float32] = spec.detach().cpu().numpy()
-    boxes_np: npt.NDArray[np.int32] = boxes.detach().cpu().numpy()
+    spec_np, boxes_np, tile_id = sample
 
     if vmin is None:
         vmin = float(spec_np.min())
@@ -47,7 +41,7 @@ def visualize_stft_sample(
     assert isinstance(ax, plt.Axes)
 
     im = ax.imshow(
-        spec_np,
+        spec_np.squeeze(axis=0),
         origin="lower",
         aspect="auto",
         cmap=cmap,
@@ -57,12 +51,12 @@ def visualize_stft_sample(
 
     # Draw bounding boxes
     for b in boxes_np:
-        print(b)
-        if b.shape[0] != 4:
+        if b.shape[0] != 5:
             continue
-        x0, y0, w, h = b
+        x0, y0, w, h = b[1:]
+        print(f"BBox2D[center({x0}, {y0}), width({w}), height({h})]")
         rect = patches.Rectangle(
-            (x0, y0),
+            (x0 - w / 2.0, y0 - h / 2.0),
             w,
             h,
             linewidth=1.5,
