@@ -19,9 +19,9 @@ export W_QUANT=1
 export CUDA_HOME=/usr/local/cuda
 
 BATCH=32
-CFG=code/exps/example/custom/yolox_nano_deploy_relu_q.py
-CKPT=float/yolox_nano.pth
-Q_DIR='quantize_result'
+CFG=code/exps/example/custom/yolox_nano_stft_relu.py
+CKPT=YOLOX_outputs/yolox_nano_stft_relu/best_ckpt.pth
+Q_DIR=build/var/quantized_stft
 
 MODE='calib'
 python -m yolox.tools.quant -f ${CFG} -c ${CKPT} -b ${BATCH} -d ${GPU_NUM} --conf 0.001 --quant_mode ${MODE} --quant_dir ${Q_DIR}
@@ -31,3 +31,24 @@ python -m yolox.tools.quant -f ${CFG} -c ${CKPT} -b ${BATCH} -d ${GPU_NUM} --con
 
 # dump xmpdel
 python -m yolox.tools.quant -f ${CFG} -c ${CKPT} -b ${BATCH} -d ${GPU_NUM} --conf 0.001 --quant_mode ${MODE} --quant_dir ${Q_DIR} --is_dump
+
+# W_QUANT=1 python -m yolox.tools.quant \
+#     -f code/exps/example/custom/yolox_nano_stft_relu.py \
+#     -c YOLOX_outputs/yolox_nano_stft_relu/best_ckpt.pth \
+#     --quant_mode test \
+#     --quant_dir build/var/quantized_stft \
+#     -b 8
+# W_QUANT=1 python -m yolox.tools.quant \
+#     -f code/exps/example/custom/yolox_nano_stft_relu_q.py \
+#     -c YOLOX_outputs/yolox_nano_stft_relu/best_ckpt.pth \
+#     --quant_mode test \
+#     --quant_dir build/var/quantized_stft \
+#     --is_dump \
+#     -b 1
+# W_QUANT=1 python -m yolox.tools.quant \
+#     -f code/exps/example/custom/yolox_nano_stft_relu.py \
+#     -c YOLOX_outputs/yolox_nano_stft_relu/best_ckpt.pth \
+#     --quant_mode test \
+#     --quant_dir build/var/quantized_stft \
+#     --is_dump \
+#     -b 1
