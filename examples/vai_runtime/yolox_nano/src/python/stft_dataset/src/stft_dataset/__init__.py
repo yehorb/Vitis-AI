@@ -12,7 +12,7 @@ if t.TYPE_CHECKING:
 
     T_co = t.TypeVar("T_co", covariant=True)
     MatlabDataPoint = t.Tuple[npt.NDArray[np.float32], npt.NDArray[np.int32], str]
-    DataPoint = t.Tuple[npt.NDArray[np.float32], npt.NDArray[np.float32], str]
+    YoloxDataPoint = t.Tuple[npt.NDArray[np.float32], npt.NDArray[np.float32], str]
 
 
 class Matlab(Dataset["MatlabDataPoint"]):
@@ -96,7 +96,7 @@ class DiscoverTileIds(Dataset["MatlabDataPoint"]):
         self.close()
 
 
-class StftDataset(Dataset["DataPoint"]):
+class StftDataset(Dataset["YoloxDataPoint"]):
     """
     A PyTorch Dataset that loads STFT spectrogram tiles for YOLOX training.
 
@@ -124,7 +124,7 @@ class StftDataset(Dataset["DataPoint"]):
     def __len__(self):
         return len(self.dataset)  # pyright: ignore[reportArgumentType]
 
-    def __getitem__(self, index: int) -> DataPoint:
+    def __getitem__(self, index: int) -> YoloxDataPoint:
         m_s_db, m_boxes, tile_id = self.dataset[index]
 
         # --- Spectrogram tile: float32 [H, W] ---
