@@ -27,7 +27,7 @@ class EvaluatorParams:
     trt_file: None = None
     decoder: None = None
     test_size: None = None
-    return_output: bool = False
+    return_outputs: bool = False
 
     def get_model(self):
         return self.model.eval()
@@ -222,7 +222,7 @@ class StftEvaluator:
                     total_gt += len(gt_boxes)
                     total_pred += len(pred_boxes)
 
-                    if return_outputs:
+                    if params.return_outputs:
                         img_id = batch_idx * batch_size + i
                         output_data[img_id] = {
                             "pred_boxes": (
@@ -267,7 +267,7 @@ class StftEvaluator:
 
         logger.info(f"Eval: P={precision:.4f}, R={recall:.4f}, F1={f1:.4f}")
 
-        if return_outputs:
+        if params.return_outputs:
             return (recall, precision, summary), output_data
         return recall, precision, summary
 
