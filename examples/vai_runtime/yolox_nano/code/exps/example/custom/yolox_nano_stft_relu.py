@@ -75,8 +75,13 @@ class Exp(MyExp):
                     m.momentum = 0.03
 
         if "model" not in self.__dict__:
-            from yolox.models import YOLOX, YOLOXHead
-            from yolox.models.yolo_pafpn_deploy import YOLOPAFPN
+            if os.environ.get("W_QUANT", "0") == "1":
+                from yolox.models.yolo_head_q import YOLOXHead
+                from yolox.models.yolo_pafpn_deploy_q import YOLOPAFPN
+                from yolox.models.yolox_q import YOLOX
+            else:
+                from yolox.models import YOLOX, YOLOXHead
+                from yolox.models.yolo_pafpn_deploy import YOLOPAFPN
 
             in_channels = [256, 512, 1024]
             backbone = YOLOPAFPN(
