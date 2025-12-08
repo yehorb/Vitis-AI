@@ -296,7 +296,7 @@ def decode_yolox_outputs(
     # Determine strides based on output shapes
     # For 128x128 input: stride 8 -> 16x16, stride 16 -> 8x8, stride 32 -> 4x4
     for output in outputs:
-        h, w = output.shape[1], output.shape[2]
+        h = output.shape[1]
         stride = config.input_height // h
 
         boxes, scores = decode_single_head(output, stride, config.num_classes)
