@@ -15,9 +15,10 @@ import argparse
 import json
 import time
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Iterable
 
 import numpy as np
+import numpy.typing as npt
 
 # Vitis AI Runtime imports (available on KV260)
 import vart
@@ -492,6 +493,53 @@ class YoloxInference:
         return avg_ms
 
 
+def visualize_predictions(
+    spectrogram: npt.NDArray[np.float32],
+    detections: List[Tuple[npt.NDArray[np.float32], float]],
+    vmin: float,
+    vmax: float,
+    cmap: str = "magma",
+):
+    import matplotlib.patches as patches
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(6, 5))
+    assert isinstance(ax, plt.Axes)
+
+    im = ax.imshow(
+        spectrogram,
+        origin="lower",
+        aspect="auto",
+        cmap=cmap,
+        vmin=vmin,
+        vmax=vmax,
+    )
+
+    # Draw bounding boxes
+    for b, _ in detections:
+        if b.shape[0] != 4:
+            continue
+        x0, y0, w, h = b
+        rect = patches.Rectangle(
+            (x0 - w / 2.0, y0 - h / 2.0),
+            w,
+            h,
+            linewidth=1.5,
+            edgecolor="lime",
+            facecolor="none",
+        )
+        ax.add_patch(rect)
+
+    ax.set_xlabel("Time (frames)")
+    ax.set_ylabel("Frequency bin")
+
+    cbar = fig.colorbar(im, ax=ax)
+    cbar.set_label("Magnitude (dB)")
+
+    plt.tight_layout()
+    plt.show()
+
+
 # =============================================================================
 # CLI Entry Point
 # =============================================================================
@@ -546,6 +594,11 @@ def main():
         action="store_true",
         help="Run inference benchmark",
     )
+    parser.add_argument(
+        "--plot",
+        action="store_true",
+        help="Plot input spectrogram and boxes using matplotlib",
+    )
 
     args = parser.parse_args()
 
@@ -582,6 +635,9 @@ def main():
             print(
                 f"  [{i}] score={score:.3f} box=[{box[0]:.1f}, {box[1]:.1f}, {box[2]:.1f}, {box[3]:.1f}]"
             )
+
+        if args.plot:
+            visualize_predictions(spectrogram, detections, vmin_db, vmax_db)
 
 
 if __name__ == "__main__":
