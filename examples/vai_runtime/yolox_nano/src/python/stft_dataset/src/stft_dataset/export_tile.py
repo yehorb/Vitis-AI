@@ -3,16 +3,17 @@
 Export a spectrogram tile from the STFT dataset for edge inference testing.
 
 Usage:
-    python -m stft_dataset.export_tile \
+    # Export from split file by index:
+    stft-export-tile \
         --h5 data/stft/20251207_162413/tensors/tiles.h5 \
         --split data/stft/20251207_162413/splits/val.txt \
+        --index 0 \
         --output test_spectrogram.npy
 
-    # Or export a specific tile by index:
-    python -m stft_dataset.export_tile \
+    # Export by specific tile ID:
+    stft-export-tile \
         --h5 data/stft/20251207_162413/tensors/tiles.h5 \
-        --split data/stft/20251207_162413/splits/val.txt \
-        --index 2 \
+        --tile-id rec_20251207_162413_002 \
         --output test_spectrogram.npy
 """
 
@@ -37,17 +38,25 @@ def main() -> None:
         type=Path,
         help="Path to tiles.h5 file",
     )
-    parser.add_argument(
+
+    # Mutually exclusive: either (--split + optional --index) or --tile-id
+    source_group = parser.add_mutually_exclusive_group(required=True)
+    source_group.add_argument(
         "--split",
-        required=True,
         type=Path,
-        help="Path to split file (e.g., val.txt)",
+        help="Path to split file (e.g., val.txt). Use with --index.",
     )
+    source_group.add_argument(
+        "--tile-id",
+        type=str,
+        help="Specific tile ID to export (e.g., rec_20251207_162413_002)",
+    )
+
     parser.add_argument(
         "--index",
         type=int,
         default=0,
-        help="Index of tile to export (default: 0)",
+        help="Index of tile to export when using --split (default: 0)",
     )
     parser.add_argument(
         "--output", "-o",
@@ -69,17 +78,24 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    # Build dataset pipeline (reusing existing classes)
-    dataset = StftDataset(LoadSplit(Matlab(args.h5, []), args.split))
+    # Build dataset based on source type
+    if args.tile_id:
+        # Direct tile ID access
+        dataset = StftDataset(Matlab(args.h5, [args.tile_id]))
+        index = 0
+    else:
+        # Split file access
+        dataset = StftDataset(LoadSplit(Matlab(args.h5, []), args.split))
+        index = args.index
 
-    # Validate index
-    if args.index < 0 or args.index >= len(dataset):
-        raise ValueError(
-            f"Index {args.index} out of range. Dataset has {len(dataset)} tiles."
-        )
+        # Validate index
+        if index < 0 or index >= len(dataset):
+            raise ValueError(
+                f"Index {index} out of range. Dataset has {len(dataset)} tiles."
+            )
 
     # Get the tile
-    img, labels, tile_id = dataset[args.index]
+    img, labels, tile_id = dataset[index]
 
     # img shape is [1, H, W] from StftDataset, we want [H, W] for edge inference
     spectrogram = img[0]  # Remove channel dimension
