@@ -75,6 +75,14 @@ class Matlab(Dataset["MatlabDataPoint"]):
 
 
 class DiscoverTileIds(Dataset["MatlabDataPoint"]):
+    """
+    Dataset wrapper that discovers tile IDs from the HDF5 file.
+
+    Usage:
+        m = Matlab("tiles.h5", [])
+        d = DiscoverTileIds(m)  # populates m.tile_ids from HDF5 keys
+    """
+
     def __init__(self, dataset: Matlab):
         self.dataset: Matlab = dataset
         with h5py.File(dataset.h5_path, "r") as f:
@@ -82,6 +90,52 @@ class DiscoverTileIds(Dataset["MatlabDataPoint"]):
             if not isinstance(tiles, h5py.Group):
                 raise TypeError("loaded tile[s] of incorrect type")
             self.dataset.tile_ids = sorted(tiles.keys())
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, index: int) -> MatlabDataPoint:
+        return self.dataset[index]
+
+    def close(self):
+        return self.dataset.close()
+
+    def __del__(self):
+        self.close()
+
+
+class LoadSplit(Dataset["MatlabDataPoint"]):
+    """
+    Dataset wrapper that loads tile IDs from a split file.
+
+    Split files contain one tile ID per line (e.g., train.txt, val.txt, test.txt).
+
+    Usage:
+        m = Matlab("tiles.h5", [])
+        d = LoadSplit(m, "splits/train.txt")  # populates m.tile_ids from file
+
+    Parameters
+    ----------
+    dataset : Matlab
+        The underlying Matlab dataset to populate.
+    split_path : str or Path
+        Path to the split file containing tile IDs, one per line.
+    """
+
+    def __init__(
+        self,
+        dataset: Matlab,
+        split_path: t.Union[str, pathlib.Path],
+    ):
+        self.dataset: Matlab = dataset
+        if isinstance(split_path, str):
+            split_path = pathlib.Path(split_path)
+        self.split_path: pathlib.Path = split_path
+
+        # Load tile IDs from split file
+        with open(split_path, "r") as f:
+            tile_ids = [line.strip() for line in f if line.strip()]
+        self.dataset.tile_ids = tile_ids
 
     def __len__(self):
         return len(self.dataset)
