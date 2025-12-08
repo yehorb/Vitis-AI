@@ -15,8 +15,7 @@ import argparse
 import json
 import time
 from dataclasses import dataclass
-from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 
@@ -72,13 +71,23 @@ def get_dpu_subgraph(graph: xir.Graph) -> xir.Subgraph:
     return dpu_subgraphs[0]
 
 
+@dataclass
+class OutputTensorInfo:
+    """Information about a single output tensor."""
+
+    shape: Tuple[int, ...]
+    fixpoint: int
+    scale: float
+    name: str
+
+
 class DpuRunner:
     """
     Wrapper for VART DPU runner with buffer management.
 
     Handles:
     - Model loading and subgraph extraction
-    - Input/output buffer allocation
+    - Input/output buffer allocation (supports multiple outputs)
     - Quantization scale factors (fix-points)
     - Synchronous inference execution
     """
@@ -101,24 +110,31 @@ class DpuRunner:
         self.input_tensors = self.runner.get_input_tensors()
         self.output_tensors = self.runner.get_output_tensors()
 
-        # Extract shapes (VART uses NHWC format)
+        # Input info (single input expected)
         self.input_shape = tuple(self.input_tensors[0].dims)
-        self.output_shape = tuple(self.output_tensors[0].dims)
-
-        # Extract quantization fix-points
-        # Input: multiply by 2^fix_point before int8 conversion
-        # Output: multiply by 2^(-fix_point) for dequantization
         self.input_fixpoint = self.input_tensors[0].get_attr("fix_point")
-        self.output_fixpoint = self.output_tensors[0].get_attr("fix_point")
-
         self.input_scale = float(2**self.input_fixpoint)
-        self.output_scale = float(2 ** (-self.output_fixpoint))
+
+        # Output info (may have multiple outputs for YOLOX heads)
+        self.output_info: List[OutputTensorInfo] = []
+        for tensor in self.output_tensors:
+            fixpoint = tensor.get_attr("fix_point")
+            self.output_info.append(
+                OutputTensorInfo(
+                    shape=tuple(tensor.dims),
+                    fixpoint=fixpoint,
+                    scale=float(2 ** (-fixpoint)),
+                    name=tensor.name,
+                )
+            )
 
         # Pre-allocate buffers (C-contiguous for VART)
         self.input_buffer = [np.empty(self.input_shape, dtype=np.int8, order="C")]
-        self.output_buffer = [np.empty(self.output_shape, dtype=np.int8, order="C")]
+        self.output_buffers = [
+            np.empty(info.shape, dtype=np.int8, order="C") for info in self.output_info
+        ]
 
-    def run(self, input_float: np.ndarray) -> np.ndarray:
+    def run(self, input_float: np.ndarray) -> List[np.ndarray]:
         """
         Execute inference on DPU.
 
@@ -127,7 +143,7 @@ class DpuRunner:
                         Values should be normalized to [0, 1] range
 
         Returns:
-            Dequantized output as float32 numpy array
+            List of dequantized outputs as float32 numpy arrays
         """
         # Quantize input: scale and convert to int8
         input_scaled = input_float * self.input_scale
@@ -137,13 +153,16 @@ class DpuRunner:
         np.copyto(self.input_buffer[0], input_int8.reshape(self.input_shape))
 
         # Execute on DPU (async API, but we wait immediately)
-        job_id = self.runner.execute_async(self.input_buffer, self.output_buffer)
+        job_id = self.runner.execute_async(self.input_buffer, self.output_buffers)
         self.runner.wait(job_id)
 
-        # Dequantize output
-        output_float = self.output_buffer[0].astype(np.float32) * self.output_scale
+        # Dequantize outputs
+        outputs = []
+        for buf, info in zip(self.output_buffers, self.output_info):
+            output_float = buf.astype(np.float32) * info.scale
+            outputs.append(output_float)
 
-        return output_float
+        return outputs
 
 
 # =============================================================================
@@ -197,83 +216,96 @@ def sigmoid(x: np.ndarray) -> np.ndarray:
     return np.where(x >= 0, 1 / (1 + np.exp(-x)), np.exp(x) / (1 + np.exp(x)))
 
 
-def build_grid(
-    input_size: int,
-    strides: Tuple[int, ...],
-) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Build YOLOX anchor grid for decoding.
-
-    Args:
-        input_size: Input image size (assumes square)
-        strides: Detection head strides (e.g., [8, 16, 32])
-
-    Returns:
-        grids: Grid coordinates, shape (1, total_anchors, 2)
-        expanded_strides: Stride per anchor, shape (1, total_anchors, 1)
-    """
-    grids = []
-    expanded_strides = []
-
-    for stride in strides:
-        grid_size = input_size // stride
-        yv, xv = np.meshgrid(np.arange(grid_size), np.arange(grid_size), indexing="ij")
-        grid = np.stack((xv, yv), axis=2).reshape(1, -1, 2).astype(np.float32)
-        grids.append(grid)
-        expanded_strides.append(
-            np.full((1, grid_size * grid_size, 1), stride, dtype=np.float32)
-        )
-
-    return np.concatenate(grids, axis=1), np.concatenate(expanded_strides, axis=1)
-
-
-def decode_yolox_output(
+def decode_single_head(
     output: np.ndarray,
-    config: ModelConfig,
+    stride: int,
+    num_classes: int,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Decode raw YOLOX output to bounding boxes and scores.
+    Decode a single YOLOX detection head output.
 
     Args:
-        output: Raw model output, shape (1, num_anchors, 5 + num_classes)
-                Format per anchor: [x, y, w, h, objectness, class_scores...]
-        config: Model configuration
+        output: Head output in NHWC format, shape (1, H, W, 5+num_classes)
+        stride: Detection stride for this head
+        num_classes: Number of classes
 
     Returns:
-        boxes: Decoded boxes in xyxy format, shape (num_anchors, 4)
-        scores: Confidence scores, shape (num_anchors,)
+        boxes: Decoded boxes in xyxy format, shape (H*W, 4)
+        scores: Confidence scores, shape (H*W,)
     """
-    # Build anchor grid
-    grids, strides = build_grid(config.input_height, config.strides)
+    batch, h, w, channels = output.shape
+    assert batch == 1, "Batch size must be 1"
+
+    # Build grid for this head
+    yv, xv = np.meshgrid(np.arange(h), np.arange(w), indexing="ij")
+    grid = np.stack((xv, yv), axis=-1).astype(np.float32)  # (H, W, 2)
+
+    # Reshape output to (H*W, channels)
+    output_flat = output[0].reshape(-1, channels)  # (H*W, 5+num_classes)
 
     # Extract components
-    # Note: output layout is [x_offset, y_offset, w, h, obj_conf, cls_conf...]
-    xy = output[..., :2]
-    wh = output[..., 2:4]
-    obj_conf = output[..., 4:5]
-    cls_conf = output[..., 5 : 5 + config.num_classes]
+    xy = output_flat[:, :2]  # (H*W, 2)
+    wh = output_flat[:, 2:4]  # (H*W, 2)
+    obj_conf = output_flat[:, 4:5]  # (H*W, 1)
+    cls_conf = output_flat[:, 5 : 5 + num_classes]  # (H*W, num_classes)
 
-    # Decode box coordinates
+    # Flatten grid
+    grid_flat = grid.reshape(-1, 2)  # (H*W, 2)
+
+    # Decode coordinates
     # x_center = (x_offset + grid_x) * stride
     # y_center = (y_offset + grid_y) * stride
-    # width = exp(w) * stride
-    # height = exp(h) * stride
-    xy_decoded = (xy + grids) * strides
-    wh_decoded = np.exp(wh) * strides
+    xy_decoded = (xy + grid_flat) * stride
+    wh_decoded = np.exp(np.clip(wh, -10, 10)) * stride  # Clip to prevent overflow
 
     # Apply sigmoid to confidence scores
     obj_conf = sigmoid(obj_conf)
     cls_conf = sigmoid(cls_conf)
 
     # Final score = objectness * class_confidence
-    scores = (obj_conf * cls_conf).squeeze(-1).squeeze(0)  # (num_anchors,)
+    scores = (obj_conf * cls_conf).max(axis=1)  # (H*W,)
 
     # Convert cxcywh to xyxy
-    boxes = np.zeros((output.shape[1], 4), dtype=np.float32)
-    boxes[:, 0] = xy_decoded[0, :, 0] - wh_decoded[0, :, 0] / 2  # x1
-    boxes[:, 1] = xy_decoded[0, :, 1] - wh_decoded[0, :, 1] / 2  # y1
-    boxes[:, 2] = xy_decoded[0, :, 0] + wh_decoded[0, :, 0] / 2  # x2
-    boxes[:, 3] = xy_decoded[0, :, 1] + wh_decoded[0, :, 1] / 2  # y2
+    boxes = np.zeros((h * w, 4), dtype=np.float32)
+    boxes[:, 0] = xy_decoded[:, 0] - wh_decoded[:, 0] / 2  # x1
+    boxes[:, 1] = xy_decoded[:, 1] - wh_decoded[:, 1] / 2  # y1
+    boxes[:, 2] = xy_decoded[:, 0] + wh_decoded[:, 0] / 2  # x2
+    boxes[:, 3] = xy_decoded[:, 1] + wh_decoded[:, 1] / 2  # y2
+
+    return boxes, scores
+
+
+def decode_yolox_outputs(
+    outputs: List[np.ndarray],
+    config: ModelConfig,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Decode all YOLOX detection head outputs.
+
+    Args:
+        outputs: List of head outputs in NHWC format
+        config: Model configuration
+
+    Returns:
+        boxes: All decoded boxes in xyxy format
+        scores: All confidence scores
+    """
+    all_boxes = []
+    all_scores = []
+
+    # Determine strides based on output shapes
+    # For 128x128 input: stride 8 -> 16x16, stride 16 -> 8x8, stride 32 -> 4x4
+    for output in outputs:
+        h, w = output.shape[1], output.shape[2]
+        stride = config.input_height // h
+
+        boxes, scores = decode_single_head(output, stride, config.num_classes)
+        all_boxes.append(boxes)
+        all_scores.append(scores)
+
+    # Concatenate all heads
+    boxes = np.concatenate(all_boxes, axis=0)
+    scores = np.concatenate(all_scores, axis=0)
 
     return boxes, scores
 
@@ -321,7 +353,7 @@ def nms(
         h = np.maximum(0.0, yy2 - yy1)
         intersection = w * h
 
-        iou = intersection / (areas[i] + areas[order[1:]] - intersection)
+        iou = intersection / (areas[i] + areas[order[1:]] - intersection + 1e-6)
 
         # Keep boxes with IoU below threshold
         inds = np.where(iou <= iou_threshold)[0]
@@ -331,22 +363,22 @@ def nms(
 
 
 def postprocess(
-    output: np.ndarray,
+    outputs: List[np.ndarray],
     config: ModelConfig,
 ) -> List[Tuple[np.ndarray, float]]:
     """
     Full postprocessing pipeline: decode, filter, NMS.
 
     Args:
-        output: Raw model output from DPU
+        outputs: List of raw model outputs from DPU (one per detection head)
         config: Model configuration
 
     Returns:
         List of (box, score) tuples for detected bursts
         Each box is [x1, y1, x2, y2] in pixel coordinates
     """
-    # Decode all anchors
-    boxes, scores = decode_yolox_output(output, config)
+    # Decode all heads
+    boxes, scores = decode_yolox_outputs(outputs, config)
 
     # Filter by confidence threshold
     mask = scores > config.conf_threshold
@@ -389,7 +421,7 @@ class YoloxInference:
         xmodel_path: str,
         vmin_db: float,
         vmax_db: float,
-        config: ModelConfig = ModelConfig(),
+        config: Optional[ModelConfig] = None,
     ):
         """
         Initialize inference pipeline.
@@ -403,13 +435,14 @@ class YoloxInference:
         self.runner = DpuRunner(xmodel_path)
         self.vmin_db = vmin_db
         self.vmax_db = vmax_db
-        self.config = config
+        self.config = config if config else ModelConfig()
 
         print(f"Model loaded: {xmodel_path}")
         print(f"  Input shape: {self.runner.input_shape}")
-        print(f"  Output shape: {self.runner.output_shape}")
         print(f"  Input fix-point: {self.runner.input_fixpoint}")
-        print(f"  Output fix-point: {self.runner.output_fixpoint}")
+        print(f"  Number of output heads: {len(self.runner.output_info)}")
+        for i, info in enumerate(self.runner.output_info):
+            print(f"  Output[{i}]: shape={info.shape}, fix-point={info.fixpoint}")
 
     def detect(self, spectrogram: np.ndarray) -> List[Tuple[np.ndarray, float]]:
         """
@@ -430,10 +463,10 @@ class YoloxInference:
         )
 
         # Run DPU inference
-        output = self.runner.run(input_tensor)
+        outputs = self.runner.run(input_tensor)
 
         # Postprocess
-        detections = postprocess(output, self.config)
+        detections = postprocess(outputs, self.config)
 
         return detections
 
@@ -487,14 +520,14 @@ def main():
     parser.add_argument(
         "--vmin",
         type=float,
-        default=-80.0,
-        help="Min dB for normalization (default: -80.0)",
+        default=-90.0,
+        help="Min dB for normalization (default: -90.0)",
     )
     parser.add_argument(
         "--vmax",
         type=float,
-        default=0.0,
-        help="Max dB for normalization (default: 0.0)",
+        default=-20.0,
+        help="Max dB for normalization (default: -20.0)",
     )
     parser.add_argument(
         "--conf",
@@ -521,8 +554,8 @@ def main():
     if args.meta:
         with open(args.meta) as f:
             meta = json.load(f)
-        vmin_db = meta.get("vmin_db", vmin_db)
-        vmax_db = meta.get("vmax_db", vmax_db)
+        vmin_db = meta.get("render", {}).get("vmin_db", vmin_db)
+        vmax_db = meta.get("render", {}).get("vmax_db", vmax_db)
         print(f"Loaded normalization from {args.meta}: vmin={vmin_db}, vmax={vmax_db}")
 
     # Configure model
