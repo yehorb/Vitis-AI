@@ -69,12 +69,8 @@ class StftDataLoader:
     def __init__(
         self,
         dataset: Dataset[stft_dataset.YoloxDataPoint],
-        batch_size: int,
-        shuffle: bool = True,
-        num_workers: int = 4,
-        pin_memory: bool = True,
-        drop_last: bool = True,
-        max_labels: int = 50,
+        max_labels: int,
+        **kwargs,
     ):
         """
         Create a DataLoader for STFT dataset.
@@ -83,28 +79,14 @@ class StftDataLoader:
         ----------
         dataset : StftDataset
             The dataset to load from.
-        batch_size : int
-            Number of samples per batch.
-        shuffle : bool
-            Whether to shuffle the data.
-        num_workers : int
-            Number of worker processes for data loading.
-        pin_memory : bool
-            Whether to pin memory for faster GPU transfer.
-        drop_last : bool
-            Whether to drop the last incomplete batch.
         max_labels : int
             Maximum number of labels per image (for padding).
         """
         self.dataset = dataset
         self._loader = DataLoader(
-            dataset,
-            batch_size=batch_size,
-            shuffle=shuffle,
-            num_workers=num_workers,
-            pin_memory=pin_memory,
-            drop_last=drop_last,
+            dataset=dataset,
             collate_fn=partial(stft_collate_fn, max_labels=max_labels),
+            **kwargs,
         )
 
     def __iter__(self):
