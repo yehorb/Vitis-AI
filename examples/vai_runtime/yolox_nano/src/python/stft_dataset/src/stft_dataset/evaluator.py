@@ -7,16 +7,77 @@ Optimized for high recall (sensitivity) as the primary metric.
 
 from __future__ import annotations
 
+import dataclasses
 import time
 import typing as t
 
 import torch
 from loguru import logger
-
 from yolox import utils
 
 if t.TYPE_CHECKING:
     from stft_dataset.loader import StftDataLoader
+
+
+@dataclasses.dataclass
+class EvaluatorParams:
+    model: torch.nn.Module
+    distributed: None = None
+    half: bool = False
+    trt_file: None = None
+    decoder: None = None
+    test_size: None = None
+    return_output: bool = False
+
+    def get_model(self):
+        return self.model.eval()
+
+    def to_device(self, imgs: torch.Tensor, dtype: torch.dtype):
+        return imgs.to(dtype=dtype, device="cuda")
+
+    def should_exit_early(self):
+        return False
+
+    def exit_early(self, params: t.Dict[str, t.Any]):
+        return (0, 0, None), params
+
+    def postprocess(self, is_parallel: bool, outputs: t.Any):
+        del is_parallel  # unused
+        return outputs
+
+
+@dataclasses.dataclass
+class QEvaluatorParams:
+    quant_model: torch.nn.Module
+    float_model: torch.nn.Module
+    distributed: None = None
+    half: bool = False
+    trt_file: None = None
+    decoder: None = None
+    test_size: None = None
+    is_dump: bool = False
+    device: torch.device = torch.device("cuda")
+    return_outputs: bool = False
+
+    def get_model(self):
+        return self.quant_model.eval()
+
+    def to_device(self, imgs: torch.Tensor, dtype: torch.dtype):
+        return imgs.to(dtype=dtype, device=self.device)
+
+    def should_exit_early(self):
+        return self.is_dump
+
+    def exit_early(self, params: t.Dict[str, t.Any]):
+        if self.return_outputs:
+            return (0, 0, None), params
+        return (0, 0, None), ""
+
+    def postprocess(self, is_parallel: bool, outputs: t.Any):
+        if is_parallel:
+            return self.float_model.module.head.postprocess(outputs)
+        else:
+            return self.float_model.head.postprocess(outputs)
 
 
 class StftEvaluator:
@@ -61,16 +122,7 @@ class StftEvaluator:
         self.num_classes = num_classes
         self.iou_thre = iou_thre
 
-    def evaluate(
-        self,
-        model: torch.nn.Module,
-        distributed: bool = False,
-        half: bool = False,
-        trt_file: t.Optional[str] = None,
-        decoder: t.Optional[t.Any] = None,
-        test_size: t.Optional[t.Tuple[int, int]] = None,
-        return_outputs: bool = False,
-    ) -> t.Union[
+    def evaluate(self, *args: t.Any) -> t.Union[
         t.Tuple[float, float, str],
         t.Tuple[t.Tuple[float, float, str], t.Dict[str, t.Any]],
     ]:
@@ -105,12 +157,21 @@ class StftEvaluator:
         outputs : dict, optional
             Per-image predictions (if return_outputs=True).
         """
-        del distributed, trt_file, decoder, test_size  # unused
 
-        model = model.eval()
-        if half:
+        if len(args) == 6:
+            params = EvaluatorParams(*args)  # pyright: ignore[reportAny]
+        elif len(args) == 9:
+            params = QEvaluatorParams(*args)  # pyright: ignore[reportAny]
+        else:
+            raise AttributeError(
+                f"Unexpected call to evaluate() with {len(args)} params"
+            )
+
+        model = params.get_model()
+        if params.half:
             model = model.half()
-        dtype = torch.float16 if half else torch.float32
+        dtype = torch.float16 if params.half else torch.float32
+        is_parallel = utils.is_parallel(model)
 
         total_tp = 0
         total_fp = 0
@@ -125,7 +186,7 @@ class StftEvaluator:
 
         with torch.no_grad():
             for batch_idx, (imgs, targets) in enumerate(self.dataloader):
-                imgs = imgs.to(dtype=dtype, device="cuda")
+                imgs = params.to_device(imgs, dtype)
                 batch_size = imgs.shape[0]
                 n_samples += batch_size
 
@@ -133,6 +194,11 @@ class StftEvaluator:
                 start = time.time()
                 outputs = model(imgs)
                 inference_time += time.time() - start
+
+                if params.should_exit_early():
+                    return params.exit_early(output_data)
+
+                outputs = params.postprocess(is_parallel, outputs)
 
                 # Apply NMS
                 outputs = utils.postprocess(
