@@ -134,7 +134,9 @@ class Trainer:
         torch.cuda.set_device(self.local_rank)
         model = self.exp.get_model()
         logger.info(
-            "Model Summary: {}".format(get_model_info(model, self.exp.test_size))
+            "Model Summary: {}".format(get_model_info(
+                model, self.exp.test_size, getattr(self.exp, "input_channels", 3)
+            ))
         )
         model.to(self.device)
 
