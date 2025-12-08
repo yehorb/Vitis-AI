@@ -295,6 +295,8 @@ class StftEvaluator:
             return 0, n_pred, 0
 
         # Compute IoU matrix [M, N]
+        # Ensure both tensors are on the same device
+        gt_boxes = gt_boxes.to(pred_boxes.device)
         iou_matrix = utils.bboxes_iou(pred_boxes, gt_boxes, xyxy=True)
 
         # Greedy matching: for each prediction, find best GT match
