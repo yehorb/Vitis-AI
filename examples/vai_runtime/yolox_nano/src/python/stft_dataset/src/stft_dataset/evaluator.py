@@ -1,0 +1,316 @@
+"""
+Simple IoU-based evaluator for STFT dataset.
+
+Computes precision, recall, and F1 for single-class detection.
+Optimized for high recall (sensitivity) as the primary metric.
+"""
+
+from __future__ import annotations
+
+import time
+import typing as t
+
+import torch
+from loguru import logger
+
+from yolox import utils
+
+if t.TYPE_CHECKING:
+    from stft_dataset.loader import StftDataLoader
+
+
+class StftEvaluator:
+    """
+    Simple IoU-based evaluator for STFT burst detection.
+
+    Returns recall as primary metric (first return value) since
+    high sensitivity is critical for low-SNR signal detection.
+    """
+
+    def __init__(
+        self,
+        dataloader: StftDataLoader,
+        img_size: t.Tuple[int, int],
+        confthre: float,
+        nmsthre: float,
+        num_classes: int = 1,
+        iou_thre: float = 0.5,
+    ):
+        """
+        Initialize evaluator.
+
+        Parameters
+        ----------
+        dataloader : DataLoader
+            Validation dataloader yielding (imgs, labels) batches.
+        img_size : tuple
+            Image size (H, W) for inference.
+        confthre : float
+            Confidence threshold for filtering detections.
+        nmsthre : float
+            IoU threshold for NMS.
+        num_classes : int
+            Number of classes (default 1 for QPSK).
+        iou_thre : float
+            IoU threshold for matching predictions to ground truth.
+        """
+        self.dataloader = dataloader
+        self.img_size = img_size
+        self.confthre = confthre
+        self.nmsthre = nmsthre
+        self.num_classes = num_classes
+        self.iou_thre = iou_thre
+
+    def evaluate(
+        self,
+        model: torch.nn.Module,
+        distributed: bool = False,
+        half: bool = False,
+        trt_file: t.Optional[str] = None,
+        decoder: t.Optional[t.Any] = None,
+        test_size: t.Optional[t.Tuple[int, int]] = None,
+        return_outputs: bool = False,
+    ) -> t.Union[
+        t.Tuple[float, float, str],
+        t.Tuple[t.Tuple[float, float, str], t.Dict[str, t.Any]],
+    ]:
+        """
+        Run evaluation on validation set.
+
+        Parameters
+        ----------
+        model : nn.Module
+            Model to evaluate.
+        distributed : bool
+            Whether running distributed (not supported, ignored).
+        half : bool
+            Whether to use FP16 inference.
+        trt_file : str, optional
+            TensorRT file (not supported, ignored).
+        decoder : optional
+            Output decoder (not supported, ignored).
+        test_size : tuple, optional
+            Test image size (uses self.img_size if None).
+        return_outputs : bool
+            Whether to return per-image outputs.
+
+        Returns
+        -------
+        recall : float
+            TP / (TP + FN), primary metric for model selection.
+        precision : float
+            TP / (TP + FP).
+        summary : str
+            Human-readable summary of results.
+        outputs : dict, optional
+            Per-image predictions (if return_outputs=True).
+        """
+        del distributed, trt_file, decoder, test_size  # unused
+
+        model = model.eval()
+        if half:
+            model = model.half()
+        dtype = torch.float16 if half else torch.float32
+
+        total_tp = 0
+        total_fp = 0
+        total_fn = 0
+        total_gt = 0
+        total_pred = 0
+
+        inference_time = 0.0
+        n_samples = 0
+
+        output_data: t.Dict[str, t.Any] = {}
+
+        with torch.no_grad():
+            for batch_idx, (imgs, targets) in enumerate(self.dataloader):
+                imgs = imgs.to(dtype=dtype, device="cuda")
+                batch_size = imgs.shape[0]
+                n_samples += batch_size
+
+                # Inference
+                start = time.time()
+                outputs = model(imgs)
+                inference_time += time.time() - start
+
+                # Apply NMS
+                outputs = utils.postprocess(
+                    outputs,
+                    self.num_classes,
+                    self.confthre,
+                    self.nmsthre,
+                    class_agnostic=True,
+                )
+
+                # Match predictions to ground truth for each image
+                for i in range(batch_size):
+                    gt_boxes = self._extract_gt_boxes(targets[i])
+                    pred_boxes = self._extract_pred_boxes(outputs[i])
+
+                    tp, fp, fn = self._match_boxes(pred_boxes, gt_boxes)
+
+                    total_tp += tp
+                    total_fp += fp
+                    total_fn += fn
+                    total_gt += len(gt_boxes)
+                    total_pred += len(pred_boxes)
+
+                    if return_outputs:
+                        img_id = batch_idx * batch_size + i
+                        output_data[img_id] = {
+                            "pred_boxes": (
+                                pred_boxes.cpu().numpy().tolist()
+                                if pred_boxes is not None and len(pred_boxes) > 0
+                                else []
+                            ),
+                            "gt_boxes": (
+                                gt_boxes.cpu().numpy().tolist()
+                                if gt_boxes is not None and len(gt_boxes) > 0
+                                else []
+                            ),
+                            "tp": tp,
+                            "fp": fp,
+                            "fn": fn,
+                        }
+
+        # Compute metrics
+        precision = (
+            total_tp / (total_tp + total_fp) if (total_tp + total_fp) > 0 else 0.0
+        )
+        recall = total_tp / (total_tp + total_fn) if (total_tp + total_fn) > 0 else 0.0
+        f1 = (
+            2 * precision * recall / (precision + recall)
+            if (precision + recall) > 0
+            else 0.0
+        )
+
+        avg_time_ms = 1000 * inference_time / n_samples if n_samples > 0 else 0.0
+
+        summary = (
+            f"STFT Evaluation Results\n"
+            f"-----------------------\n"
+            f"Total GT boxes:   {total_gt}\n"
+            f"Total predictions:{total_pred}\n"
+            f"TP: {total_tp}, FP: {total_fp}, FN: {total_fn}\n"
+            f"Precision: {precision:.4f}\n"
+            f"Recall:    {recall:.4f}\n"
+            f"F1 Score:  {f1:.4f}\n"
+            f"Avg inference time: {avg_time_ms:.2f} ms/image\n"
+        )
+
+        logger.info(f"Eval: P={precision:.4f}, R={recall:.4f}, F1={f1:.4f}")
+
+        if return_outputs:
+            return (recall, precision, summary), output_data
+        return recall, precision, summary
+
+    def _extract_gt_boxes(self, targets: torch.Tensor) -> torch.Tensor:
+        """
+        Extract ground truth boxes from targets tensor.
+
+        Parameters
+        ----------
+        targets : torch.Tensor
+            Shape [max_labels, 5] with format (class_id, cx, cy, w, h).
+            Zero-padded rows have sum == 0.
+
+        Returns
+        -------
+        boxes : torch.Tensor
+            Shape [N, 4] in xyxy format, on same device as input.
+        """
+        # Filter out zero-padded rows
+        valid_mask = targets.sum(dim=1) > 0
+        valid_targets = targets[valid_mask]
+
+        if len(valid_targets) == 0:
+            return torch.empty((0, 4), device=targets.device)
+
+        # Convert cxcywh to xyxy
+        cx = valid_targets[:, 1]
+        cy = valid_targets[:, 2]
+        w = valid_targets[:, 3]
+        h = valid_targets[:, 4]
+
+        x1 = cx - w / 2
+        y1 = cy - h / 2
+        x2 = cx + w / 2
+        y2 = cy + h / 2
+
+        return torch.stack([x1, y1, x2, y2], dim=1)
+
+    def _extract_pred_boxes(self, detections: t.Optional[torch.Tensor]) -> torch.Tensor:
+        """
+        Extract prediction boxes from postprocess output.
+
+        Parameters
+        ----------
+        detections : torch.Tensor or None
+            Shape [N, 7] with format (x1, y1, x2, y2, obj_conf, class_conf, class_pred).
+            None if no detections.
+
+        Returns
+        -------
+        boxes : torch.Tensor
+            Shape [N, 4] in xyxy format.
+        """
+        if detections is None or len(detections) == 0:
+            return torch.empty((0, 4), device="cuda")
+
+        return detections[:, :4]
+
+    def _match_boxes(
+        self,
+        pred_boxes: torch.Tensor,
+        gt_boxes: torch.Tensor,
+    ) -> t.Tuple[int, int, int]:
+        """
+        Match predictions to ground truth using greedy IoU matching.
+
+        Parameters
+        ----------
+        pred_boxes : torch.Tensor
+            Shape [M, 4] predicted boxes in xyxy format.
+        gt_boxes : torch.Tensor
+            Shape [N, 4] ground truth boxes in xyxy format.
+
+        Returns
+        -------
+        tp : int
+            True positives (matched predictions).
+        fp : int
+            False positives (unmatched predictions).
+        fn : int
+            False negatives (unmatched ground truth).
+        """
+        n_pred = len(pred_boxes)
+        n_gt = len(gt_boxes)
+
+        if n_pred == 0 and n_gt == 0:
+            return 0, 0, 0
+        if n_pred == 0:
+            return 0, 0, n_gt
+        if n_gt == 0:
+            return 0, n_pred, 0
+
+        # Compute IoU matrix [M, N]
+        iou_matrix = utils.bboxes_iou(pred_boxes, gt_boxes, xyxy=True)
+
+        # Greedy matching: for each prediction, find best GT match
+        matched_gt = set()
+        tp = 0
+
+        for pred_idx in range(n_pred):
+            ious = iou_matrix[pred_idx]
+            best_gt_idx = int(ious.argmax().item())
+            best_iou = float(ious[best_gt_idx].item())
+
+            if best_iou >= self.iou_thre and best_gt_idx not in matched_gt:
+                tp += 1
+                matched_gt.add(best_gt_idx)
+
+        fp = n_pred - tp
+        fn = n_gt - len(matched_gt)
+
+        return tp, fp, fn
