@@ -80,7 +80,7 @@ x = sqrt(Pn/2) * (randn(N_total,1) + 1j*randn(N_total,1));  % flat noise over wh
 
 gt = struct('t0',{},'t1',{},'fmin',{},'fmax',{});
 t0 = 0; pulse_idx = 0;
-num_it_log = 0;
+num_it_log = cfg.how_often_to_log_signal;
 
 while t0 < (cfg.total_duration - rngs.pw_min)
     f0  = rngs.freq_min + (rngs.freq_max - rngs.freq_min)*rand;
@@ -232,7 +232,7 @@ h5writeatt_safe(ds.h5_path, '/', 'vmax_db',               render.vmax_db);
 W = stft.frames_per_image;
 n_tiles = ceil(total_frames / W);
 image_ids = strings(0);
-num_it_log = 0;
+num_it_log = cfg.how_often_to_log_tiles;
 
 for k = 1:n_tiles
     idx0 = (k-1)*W + 1; idx1 = min(k*W, total_frames);
