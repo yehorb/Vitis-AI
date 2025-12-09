@@ -1,0 +1,6 @@
+{
+  "include": [
+    "."
+  ],
+  "reportUnusedCallResult": false
+}
