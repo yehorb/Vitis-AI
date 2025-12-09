@@ -108,6 +108,8 @@ class Exp(MyExp):
     def get_data_loader(
         self, batch_size, is_distributed, no_aug=False, cache_img=False
     ):
+        del no_aug, cache_img  # unused
+
         from stft_dataset import LoadSplit, Matlab, StftDataset
         from stft_dataset.loader import StftDataLoader
         from stft_dataset.normalization import Normalize, load_normalization_params
