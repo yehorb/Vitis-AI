@@ -237,6 +237,38 @@ n_tiles = ceil(total_frames / W);
 image_ids = strings(0);
 num_it_log = cfg.how_often_to_log_tiles;
 
+% ------------------------- PRECOMPUTE GT INDICES -----------------
+% Convert ground truth from physical units (seconds, Hz) to STFT grid
+% indices (frame number, bin number). This avoids repeated find() calls
+% inside the tile loop.
+%
+% For each pulse gi:
+%   gt_c1(gi): first STFT frame index where pulse is present
+%   gt_c2(gi): last STFT frame index where pulse is present
+%   gt_r1(gi): first frequency bin index covering the pulse
+%   gt_r2(gi): last frequency bin index covering the pulse
+%
+% T is the time vector from spectrogram (1 x total_frames)
+% F is the frequency vector from spectrogram (H x 1)
+
+n_gt = numel(gt);
+gt_c1 = zeros(n_gt, 1);
+gt_c2 = zeros(n_gt, 1);
+gt_r1 = zeros(n_gt, 1);
+gt_r2 = zeros(n_gt, 1);
+
+for gi = 1:n_gt
+    % Map pulse time bounds [t0, t1] to frame indices [c1, c2]
+    % find(..., 'first') returns the smallest index where condition is true
+    gt_c1(gi) = find(T >= gt(gi).t0, 1, 'first');
+    gt_c2(gi) = find(T <= gt(gi).t1, 1, 'last');
+
+    % Map pulse frequency bounds [fmin, fmax] to bin indices [r1, r2]
+    gt_r1(gi) = find(F >= gt(gi).fmin, 1, 'first');
+    gt_r2(gi) = find(F <= gt(gi).fmax, 1, 'last');
+end
+
+% ------------------------- TILE LOOP -----------------------------
 for k = 1:n_tiles
     idx0 = (k-1)*W + 1; idx1 = min(k*W, total_frames);
     tile_id = sprintf('rec_%s_%03d', run_id, k-1);  % no seed in name
@@ -259,21 +291,28 @@ for k = 1:n_tiles
     end
     boxes_for_h5 = [];
 
-    for gi = 1:numel(gt)
-        c1 = find(T >= gt(gi).t0, 1, 'first');   if isempty(c1), continue; end
-        c2 = find(T <= gt(gi).t1, 1, 'last');    if isempty(c2), continue; end
-        r1 = find(F >= gt(gi).fmin, 1, 'first'); if isempty(r1), continue; end
-        r2 = find(F <= gt(gi).fmax, 1, 'last');  if isempty(r2), continue; end
+    for gi = 1:n_gt
+        % Use precomputed frame/bin indices instead of find()
+        c1 = gt_c1(gi);
+        c2 = gt_c2(gi);
+        r1 = gt_r1(gi);
+        r2 = gt_r2(gi);
 
-        x0 = c1 - idx0; x1 = c2 - idx0;  % frames
-        y0 = r1 - 1;    y1 = r2 - 1;     % bins (0-based)
+        % Convert global frame indices to tile-local x coordinates
+        % idx0 is the first global frame index of this tile
+        x0 = c1 - idx0;
+        x1 = c2 - idx0;
 
-        % reject non-intersecting BEFORE clipping
+        % Convert bin indices to 0-based y coordinates
+        y0 = r1 - 1;
+        y1 = r2 - 1;
+
+        % Reject pulses that don't intersect this tile
         if x1 < 0 || x0 > (W-1) || y1 < 0 || y0 > (H-1)
             continue;
         end
 
-        % clip into tile
+        % Clip box coordinates to tile boundaries [0, W-1] x [0, H-1]
         x0c = max(0, min(W-1, x0));
         x1c = max(0, min(W-1, x1));
         y0c = max(0, min(H-1, y0));
