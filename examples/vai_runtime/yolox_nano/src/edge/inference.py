@@ -801,11 +801,26 @@ def visualize_predictions(
     vmin: float,
     vmax: float,
     cmap: str = "magma",
+    title: str = "YOLOX Burst Detection (Edge)",
 ):
+    """
+    Visualize spectrogram with detection bounding boxes.
+
+    Args:
+        spectrogram: Input spectrogram, shape (H, W)
+        detections: List of (box, score) tuples from postprocess()
+                    Box format is xyxy: [x1, y1, x2, y2]
+        vmin: Min value for colormap normalization
+        vmax: Max value for colormap normalization
+        cmap: Matplotlib colormap name
+        title: Plot title
+        save_path: If provided, save figure to this path instead of showing
+    """
+
     import matplotlib.patches as patches
     import matplotlib.pyplot as plt
 
-    fig, ax = plt.subplots(figsize=(6, 5))
+    fig, ax = plt.subplots(figsize=(8, 6))
     assert isinstance(ax, plt.Axes)
 
     im = ax.imshow(
@@ -817,23 +832,36 @@ def visualize_predictions(
         vmax=vmax,
     )
 
-    # Draw bounding boxes
-    for b, _ in detections:
-        if b.shape[0] != 4:
+    # Draw bounding boxes (xyxy format)
+    for box, score in detections:
+        if box.shape[0] != 4:
             continue
-        x0, y0, w, h = b
+        x1, y1, x2, y2 = box
+        width = x2 - x1
+        height = y2 - y1
         rect = patches.Rectangle(
-            (x0 - w / 2.0, y0 - h / 2.0),
-            w,
-            h,
-            linewidth=1.5,
+            (x1, y1),
+            width,
+            height,
+            linewidth=2,
             edgecolor="lime",
             facecolor="none",
         )
         ax.add_patch(rect)
+        # Add score label
+        ax.text(
+            x1,
+            y2 + 2,
+            f"{score:.2f}",
+            color="lime",
+            fontsize=8,
+            fontweight="bold",
+            verticalalignment="bottom",
+        )
 
     ax.set_xlabel("Time (frames)")
     ax.set_ylabel("Frequency bin")
+    ax.set_title(title)
 
     cbar = fig.colorbar(im, ax=ax)
     cbar.set_label("Magnitude (dB)")
