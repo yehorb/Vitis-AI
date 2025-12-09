@@ -71,11 +71,16 @@ Fs      = stft.sample_rate_hz;
 N_total = round(cfg.total_duration * Fs);
 rng(cfg.seed);
 
+% ------------------------- LOG -----------------------------------
+cfg.how_often_to_log_signal = 1000;
+cfg.how_often_to_log_tiles = 100;
+
 Pn = 10^(cfg.noise_power_db/10);
 x = sqrt(Pn/2) * (randn(N_total,1) + 1j*randn(N_total,1));  % flat noise over whole record
 
 gt = struct('t0',{},'t1',{},'fmin',{},'fmax',{});
 t0 = 0; pulse_idx = 0;
+num_it_log = 0;
 
 while t0 < (cfg.total_duration - rngs.pw_min)
     f0  = rngs.freq_min + (rngs.freq_max - rngs.freq_min)*rand;
@@ -153,6 +158,14 @@ while t0 < (cfg.total_duration - rngs.pw_min)
                 t0 = t0 + per;
         end
     end
+
+    if num_it_log == cfg.how_often_to_log_signal
+        fprintf('Generating signal. Time=%.2f | Total duration=%.2f | run_id=%s\n', ...
+            t0, cfg.total_duration, run_id);
+        num_it_log = 0;
+    else
+        num_it_log = num_it_log + 1;
+    end
 end
 
 % ------------------------- SAVE IQ RECORD (int16 + float32) -----
@@ -219,6 +232,7 @@ h5writeatt_safe(ds.h5_path, '/', 'vmax_db',               render.vmax_db);
 W = stft.frames_per_image;
 n_tiles = ceil(total_frames / W);
 image_ids = strings(0);
+num_it_log = 0;
 
 for k = 1:n_tiles
     idx0 = (k-1)*W + 1; idx1 = min(k*W, total_frames);
@@ -282,6 +296,14 @@ for k = 1:n_tiles
     h5create_safe(ds.h5_path, dset_B, size(boxes_mat), 'int32', [max(1,size(boxes_mat,1)), 4], 1);
     if ~isempty(boxes_mat)
         h5write(ds.h5_path, dset_B, boxes_mat);
+    end
+
+    if num_it_log == cfg.how_often_to_log_tiles
+        fprintf('Writing tiles. Tiles=%d | Total=%d | run_id=%s\n', ...
+            k, n_tiles, run_id);
+        num_it_log = 0;
+    else
+        num_it_log = num_it_log + 1;
     end
 end
 
