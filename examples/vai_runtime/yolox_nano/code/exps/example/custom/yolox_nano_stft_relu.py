@@ -35,7 +35,7 @@ class Exp(MyExp):
         self.multiscale_range = 0
 
         # ---------------- data paths ---------------- #
-        self.data_dir = pathlib.Path("data/stft/20251207_162413")
+        self.data_dir = pathlib.Path(os.environ["STFT_DATASET"])
         self.h5_path = self.data_dir / "tensors" / "tiles.h5"
         self.meta_path = self.data_dir / "meta.json"
         self.train_split = self.data_dir / "splits" / "train.txt"
