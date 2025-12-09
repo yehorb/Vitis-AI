@@ -29,7 +29,7 @@ class Exp(MyExp):
         # ---------------- dataloader config ---------------- #
         self.input_size = (128, 128)  # STFT tile size
         self.test_size = (128, 128)
-        self.data_num_workers = 4
+        self.data_num_workers = 2  # Limited by HDF5 file handle constraints
 
         # Disable multi-scale training (fixed size spectrograms)
         self.multiscale_range = 0
@@ -46,19 +46,20 @@ class Exp(MyExp):
         self.mosaic_prob = 0.0
         self.mixup_prob = 0.0
         self.hsv_prob = 0.0
-        self.flip_prob = 0.0  # Could enable horizontal flip if desired
+        self.flip_prob = 0.5  # Time-reversal augmentation (valid for spectrograms)
         self.enable_mixup = False
 
         # ---------------- training config ---------------- #
-        self.max_epoch = 100
-        self.warmup_epochs = 5
-        self.no_aug_epochs = 10
-        self.eval_interval = 5
+        self.max_epoch = 20
+        self.warmup_epochs = 2
+        self.no_aug_epochs = 0
+        self.eval_interval = 2
         self.print_interval = 10
-        self.save_history_ckpt = True
+        self.save_history_ckpt = False  # Save disk space, keep only best/latest
 
         # Learning rate
-        self.basic_lr_per_img = 0.01 / 64.0
+        # Effective LR = basic_lr_per_img * batch_size
+        self.basic_lr_per_img = 0.001 / 64.0
 
         # ---------------- testing config ---------------- #
         self.test_conf = 0.01
