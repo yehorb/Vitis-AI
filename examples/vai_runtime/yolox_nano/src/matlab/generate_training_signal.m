@@ -37,7 +37,7 @@ cfg.noise_power_db = -80;        % mean noise power in dB
 % Add a slight margin to avoid generating signals right on an edge
 rngs.freq_min = -4.5e6; rngs.freq_max = 4.5e6;
 % 5 db is a heuristic "threshold" for CFAR detector, we add a bit more
-rngs.snr_min = -15; rngs.snr_max = 5 + 3;
+rngs.snr_min = -15; rngs.snr_max = 5;
 
 rngs.pw_min  = 20e-6;  rngs.pw_max  = 120e-6;
 rngs.per_min = 150e-6; rngs.per_max = 400e-6;
