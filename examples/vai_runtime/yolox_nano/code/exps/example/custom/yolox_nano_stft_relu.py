@@ -108,11 +108,15 @@ class Exp(MyExp):
     def get_data_loader(
         self, batch_size, is_distributed, no_aug=False, cache_img=False
     ):
-        del no_aug, cache_img  # unused
+        del cache_img  # unused
 
         from stft_dataset import LoadSplit, Matlab, StftDataset
         from stft_dataset.loader import StftDataLoader
-        from stft_dataset.normalization import Normalize, load_normalization_params
+        from stft_dataset.normalization import (
+            Normalize,
+            RandomHorizontalFlip,
+            load_normalization_params,
+        )
         from yolox.data import InfiniteSampler
 
         # Load normalization parameters
@@ -124,6 +128,14 @@ class Exp(MyExp):
             vmin_db,
             vmax_db,
         )
+
+        # Apply horizontal flip augmentation (time-reversal) unless disabled
+        if not no_aug and self.flip_prob > 0:
+            dataset = RandomHorizontalFlip(
+                dataset,
+                flip_prob=self.flip_prob,
+                img_width=self.input_size[1],
+            )
 
         if is_distributed:
             batch_size = batch_size // dist.get_world_size()
