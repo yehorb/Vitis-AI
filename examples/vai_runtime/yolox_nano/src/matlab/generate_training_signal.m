@@ -229,6 +229,9 @@ h5writeatt_safe(ds.h5_path, '/', 'vmin_db',               render.vmin_db);
 h5writeatt_safe(ds.h5_path, '/', 'vmax_db',               render.vmax_db);
 
 % ------------------------- TILES + JSON + HDF5 per-tile ----------
+cfg.write_png = false;
+cfg.write_json_annotations = false;
+
 W = stft.frames_per_image;
 n_tiles = ceil(total_frames / W);
 image_ids = strings(0);
@@ -244,12 +247,16 @@ for k = 1:n_tiles
         SdBk = [SdBk, repmat(SdBk(:,end), 1, W-size(SdBk,2))];
     end
 
-    I16 = to_uint16_db(double(SdBk));
-    imwrite(I16, fullfile(ds.images_dir, [tile_id '.png']));
+    if cfg.write_png
+        I16 = to_uint16_db(double(SdBk));
+        imwrite(I16, fullfile(ds.images_dir, [tile_id '.png']));
+    end
 
-    ann.image = struct('id',tile_id,'file_name',fullfile('images_tiles',[tile_id '.png']),...
-                       'width',W,'height',H);
-    ann.annotations = [];
+    if cfg.write_json_annotations
+        ann.image = struct('id',tile_id,'file_name',fullfile('images_tiles',[tile_id '.png']),...
+                           'width',W,'height',H);
+        ann.annotations = [];
+    end
     boxes_for_h5 = [];
 
     for gi = 1:numel(gt)
@@ -276,14 +283,18 @@ for k = 1:n_tiles
         end
 
         box = [x0c, y0c, (x1c - x0c + 1), (y1c - y0c + 1)];
-        a = struct('id',gi,'category_id',1,'bbox',box,'iscrowd',0);
-        ann.annotations = [ann.annotations, a];
+        if cfg.write_json_annotations
+            a = struct('id',gi,'category_id',1,'bbox',box,'iscrowd',0);
+            ann.annotations = [ann.annotations, a];
+        end
         boxes_for_h5 = [boxes_for_h5; box]; %#ok<AGROW>
     end
 
-    fid = fopen(fullfile(ds.ann_dir, [tile_id '.json']), 'w');
-    fwrite(fid, jsonencode(ann, 'PrettyPrint', true));
-    fclose(fid);
+    if cfg.write_json_annotations
+        fid = fopen(fullfile(ds.ann_dir, [tile_id '.json']), 'w');
+        fwrite(fid, jsonencode(ann, 'PrettyPrint', true));
+        fclose(fid);
+    end
 
     dset_S = ['/S_db/' char(tile_id)];
     dset_B = ['/boxes/' char(tile_id)];
