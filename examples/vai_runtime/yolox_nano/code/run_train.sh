@@ -18,4 +18,4 @@ GPU_NUM=1
 BATCH=8
 
 CFG=code/exps/example/custom/yolox_nano_stft_relu.py
-python -m yolox.tools.train -f ${CFG} -d ${GPU_NUM} -b ${BATCH} -o
+python -m yolox.tools.train -f ${CFG} -d ${GPU_NUM} -b ${BATCH} --fp16
