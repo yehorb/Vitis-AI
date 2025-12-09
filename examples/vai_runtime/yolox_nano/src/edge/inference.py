@@ -2,11 +2,229 @@
 """
 YOLOX STFT Burst Detection - KV260 Edge Inference
 
-Minimal reference implementation for running quantized YOLOX on Vitis AI DPU.
+Reference implementation for running quantized YOLOX on Vitis AI DPU.
 Requires: vart, xir (installed on KV260 Vitis AI image)
 
 Usage:
     python inference.py --model yolox_stft_kv260.xmodel --input spectrogram.npy
+
+================================================================================
+ARCHITECTURE OVERVIEW: Why DPU Outputs Separate Tensors
+================================================================================
+
+When running YOLOX on the host (PyTorch), the model outputs decoded bounding
+boxes ready for visualization. On the DPU, we receive RAW tensors that require
+manual postprocessing. This section explains why.
+
+HOST vs EDGE Output Difference
+------------------------------
+
+On HOST (PyTorch training/evaluation):
+    model(input) -> decoded boxes (N, 336, 6) with coordinates in pixels
+
+On EDGE (DPU inference):
+    model(input) -> [head0 (1,16,16,6), head1 (1,8,8,6), head2 (1,4,4,6)]
+                    Raw logits, separate tensors, NHWC format
+
+The difference stems from the model architecture designed for quantization.
+
+Why Separate Tensors?
+---------------------
+
+1. GRAPH STRUCTURE (code/yolox/models/yolo_head_q.py lines 224-225):
+
+   In inference mode, the quantization-ready head returns a Python list:
+
+       def forward(self, xin, labels=None, imgs=None):
+           ...
+           else:  # inference mode
+               return outputs  # List of 3 tensors, NOT concatenated
+
+   The postprocess() method (lines 227-237) that concatenates and decodes
+   is NOT part of the traced computational graph - it's called separately
+   by the evaluator after inference.
+
+2. DPU HARDWARE LIMITATIONS:
+
+   The Vitis AI compiler (vai_c_xir) analyzes the graph and determines what
+   can run on DPU hardware. The DPU excels at:
+   - Convolutions, pooling, element-wise ops
+   - Fixed tensor shapes
+
+   It cannot efficiently handle:
+   - Dynamic reshape across different spatial sizes
+   - Concatenation of tensors with different H/W dimensions
+
+   The 3 detection heads have different spatial sizes:
+   - Head 0: 16x16 (stride 8,  for small objects)
+   - Head 1: 8x8   (stride 16, for medium objects)
+   - Head 2: 4x4   (stride 32, for large objects)
+
+   Merging these requires flatten + concat + permute, which would run on CPU
+   anyway. So the compiler places the output boundary at the last conv layer
+   of each head.
+
+3. COMPILATION BOUNDARY:
+
+   PyTorch Graph:
+       Backbone -> FPN -> Head[k] -> stem -> cls_conv -> cls_pred -+
+                                  -> reg_conv -> reg_pred ----------+-> q_cat -> DeQuantStub -> OUTPUT[k]
+                                             -> obj_pred -----------+
+
+   The q_cat (quantized concat of reg/obj/cls within same head) IS on DPU
+   because all inputs have identical spatial dimensions. But cross-head
+   merging would require CPU operations.
+
+Host-Side Postprocessing Reference
+----------------------------------
+
+On the host, the evaluator (code/yolox/evaluators/coco_evaluator_q.py) calls
+postprocess() explicitly after getting raw outputs:
+
+    outputs = float_model.module.head.postprocess(outputs)  # line 180
+
+This postprocess() method in yolo_head_q.py (lines 227-237) does:
+    1. Flatten each head: x.flatten(start_dim=2) for x in outputs
+    2. Concatenate: torch.cat(..., dim=2)
+    3. Permute to (batch, n_anchors, channels)
+    4. Apply sigmoid to confidence scores
+    5. Decode coordinates via decode_outputs()
+
+This script replicates that logic for edge deployment.
+
+================================================================================
+DECODING PROCESS: From Raw Logits to Bounding Boxes
+================================================================================
+
+The DPU outputs raw network predictions that must be decoded to pixel coords.
+
+Channel Layout (from yolo_head_q.py line 186)
+---------------------------------------------
+
+Each detection head output has 6 channels (for 1-class detection):
+
+    output = q_cat([reg_output, obj_output, cls_output], dim=1)
+    #              [  0:4     ,    4:5    ,    5:6    ]
+
+    Channel 0-1: x, y offsets (raw, not activated)
+    Channel 2-3: w, h predictions (raw, apply exp())
+    Channel 4:   objectness logit (apply sigmoid)
+    Channel 5+:  class logits (apply sigmoid)
+
+Grid-Based Coordinate Decoding
+------------------------------
+
+YOLOX uses anchor-free detection with grid-based coordinate prediction.
+Each spatial location (i, j) in the feature map predicts one detection.
+
+Reference: yolo_head_q.py decode_outputs() (lines 259-274)
+
+For a feature map of size (H, W) with stride S:
+
+    # Build coordinate grid (meshgrid of cell indices)
+    grid[i, j] = (j, i)  # (x_cell, y_cell)
+
+    # Decode center coordinates
+    x_center = (x_offset + grid_x) * stride
+    y_center = (y_offset + grid_y) * stride
+
+    # Decode width/height (exponential to ensure positive)
+    width  = exp(w_raw) * stride
+    height = exp(h_raw) * stride
+
+This corresponds to yolo_head_q.py lines 272-273:
+    outputs[..., :2] = (outputs[..., :2] + grids) * strides
+    outputs[..., 2:4] = torch.exp(outputs[..., 2:4]) * strides
+
+Confidence Score Computation
+----------------------------
+
+Final detection confidence combines objectness and class probability:
+
+    obj_conf = sigmoid(obj_logit)      # P(object exists)
+    cls_conf = sigmoid(cls_logit)      # P(class | object)
+    score = obj_conf * cls_conf        # P(class)
+
+Reference: yolo_head_q.py line 233:
+    outputs[..., 4:] = outputs[..., 4:].sigmoid()
+
+Box Format Conversion
+---------------------
+
+Network predicts center-based format (cx, cy, w, h).
+We convert to corner format (x1, y1, x2, y2) for NMS:
+
+    x1 = cx - w/2
+    y1 = cy - h/2
+    x2 = cx + w/2
+    y2 = cy + h/2
+
+================================================================================
+TENSOR FORMAT: NCHW vs NHWC
+================================================================================
+
+PyTorch (host):  NCHW - (batch, channels, height, width)
+DPU (edge):      NHWC - (batch, height, width, channels)
+
+The Vitis AI compiler automatically transposes tensors for DPU efficiency.
+This script handles NHWC format in decode_single_head().
+
+Example for 128x128 input with stride 8:
+    PyTorch output: (1, 6, 16, 16) - NCHW
+    DPU output:     (1, 16, 16, 6) - NHWC
+
+================================================================================
+COMPLETE PROCESSING PIPELINE
+================================================================================
+
+1. PREPROCESSING (preprocess_spectrogram):
+   - Normalize dB values to [0, 1] using vmin/vmax from training
+   - Reshape to NHWC format (1, H, W, 1)
+
+2. DPU INFERENCE (DpuRunner.run):
+   - Quantize float input to int8 using fix-point scale
+   - Execute on DPU hardware
+   - Dequantize int8 outputs back to float32
+   - Returns list of 3 tensors (one per detection head)
+
+3. POSTPROCESSING (postprocess -> decode_yolox_outputs):
+   For each detection head:
+   a. Determine stride from spatial size: stride = input_size / feature_size
+   b. Build coordinate grid for this head
+   c. Decode (x, y) centers: (offset + grid) * stride
+   d. Decode (w, h): exp(raw) * stride
+   e. Apply sigmoid to objectness and class logits
+   f. Compute final score: obj_conf * cls_conf
+   g. Convert cxcywh to xyxy format
+
+4. FILTERING AND NMS:
+   - Filter detections by confidence threshold
+   - Apply Non-Maximum Suppression to remove duplicates
+   - Return final list of (box, score) tuples
+
+================================================================================
+FILE REFERENCES
+================================================================================
+
+Training/Quantization (host):
+    code/yolox/models/yolo_head_q.py     - Detection head with quantization stubs
+        forward() lines 149-225          - Returns list of raw tensors
+        postprocess() lines 227-237      - Concat + sigmoid + decode
+        decode_outputs() lines 259-274   - Grid-based coordinate decoding
+
+    code/yolox/evaluators/coco_evaluator_q.py
+        lines 180-182                    - Calls head.postprocess() after inference
+
+    code/yolox/models/yolo_pafpn_deploy_q.py  - Feature pyramid network
+    code/yolox/models/darknet_deploy_q.py    - Backbone network
+
+Edge Inference (this file):
+    decode_single_head()      - Equivalent to decode_outputs() for one head
+    decode_yolox_outputs()    - Iterates heads, equivalent to postprocess()
+    sigmoid()                 - Equivalent to .sigmoid() in PyTorch
+    nms()                     - Non-Maximum Suppression
+
+================================================================================
 """
 
 from __future__ import annotations
@@ -91,6 +309,28 @@ class DpuRunner:
     - Input/output buffer allocation (supports multiple outputs)
     - Quantization scale factors (fix-points)
     - Synchronous inference execution
+
+    Why Multiple Outputs?
+    ---------------------
+    The Vitis AI compiler partitions the YOLOX graph such that each detection
+    head becomes a separate output tensor. This happens because:
+
+    1. The quantization-ready model (yolo_head_q.py) returns a list of tensors
+       in inference mode, not a concatenated tensor (see forward() line 225)
+
+    2. The DPU cannot efficiently concatenate tensors with different spatial
+       dimensions (16x16, 8x8, 4x4) - this would require reshape operations
+       that run on CPU anyway
+
+    3. The compiler places output boundaries at the last DPU-executable op
+       in each branch (the DeQuantStub after q_cat for each head)
+
+    Typical output configuration for YOLOX-nano on 128x128 input:
+        Output[0]: (1, 16, 16, 6) - stride 8 head,  256 anchors
+        Output[1]: (1, 8, 8, 6)   - stride 16 head, 64 anchors
+        Output[2]: (1, 4, 4, 6)   - stride 32 head, 16 anchors
+
+    Note: Shapes are NHWC (DPU format), not NCHW (PyTorch format)
     """
 
     def __init__(self, xmodel_path: str):
@@ -225,14 +465,35 @@ def decode_single_head(
     """
     Decode a single YOLOX detection head output.
 
+    This function is the NumPy equivalent of the PyTorch decoding in:
+        code/yolox/models/yolo_head_q.py :: decode_outputs() (lines 259-274)
+
+    The key difference is that we process one head at a time (since DPU outputs
+    separate tensors), whereas the PyTorch version concatenates first then decodes.
+
+    Decoding formulas (from yolo_head_q.py lines 272-273):
+        x_center = (x_offset + grid_x) * stride
+        y_center = (y_offset + grid_y) * stride
+        width    = exp(w_raw) * stride
+        height   = exp(h_raw) * stride
+
+    Channel layout (from yolo_head_q.py line 186):
+        output = concat([reg_output, obj_output, cls_output], dim=1)
+        channels: [x, y, w, h, obj, cls0, cls1, ...]
+                  [0, 1, 2, 3, 4,   5,    6,    ...]
+
     Args:
         output: Head output in NHWC format, shape (1, H, W, 5+num_classes)
-        stride: Detection stride for this head
-        num_classes: Number of classes
+                Note: DPU outputs NHWC, PyTorch uses NCHW
+        stride: Detection stride for this head (8, 16, or 32)
+                Determines the scale of coordinate predictions
+        num_classes: Number of detection classes
 
     Returns:
         boxes: Decoded boxes in xyxy format, shape (H*W, 4)
+               Coordinates are in pixel space of the input image
         scores: Confidence scores, shape (H*W,)
+                Combined objectness * class_confidence
     """
     batch, h, w, channels = output.shape
     assert batch == 1, "Batch size must be 1"
@@ -283,13 +544,31 @@ def decode_yolox_outputs(
     """
     Decode all YOLOX detection head outputs.
 
+    This function is the NumPy equivalent of:
+        code/yolox/models/yolo_head_q.py :: postprocess() (lines 227-237)
+
+    Key difference from PyTorch version:
+    - PyTorch: Concatenates heads first, then decodes all at once
+    - Here: Decodes each head separately, then concatenates results
+
+    This is necessary because the DPU outputs separate tensors for each head
+    (see module docstring for explanation of why DPU separates tensors).
+
+    For a 128x128 input image, the three heads produce:
+        Head 0: 16x16 grid, stride 8  -> 256 anchors (small objects)
+        Head 1: 8x8 grid,   stride 16 -> 64 anchors  (medium objects)
+        Head 2: 4x4 grid,   stride 32 -> 16 anchors  (large objects)
+        Total: 336 anchor predictions
+
     Args:
-        outputs: List of head outputs in NHWC format
-        config: Model configuration
+        outputs: List of head outputs in NHWC format from DPU
+                 Typically 3 tensors with shapes like:
+                 [(1,16,16,6), (1,8,8,6), (1,4,4,6)]
+        config: Model configuration with input dimensions
 
     Returns:
-        boxes: All decoded boxes in xyxy format
-        scores: All confidence scores
+        boxes: All decoded boxes in xyxy format, shape (336, 4)
+        scores: All confidence scores, shape (336,)
     """
     all_boxes = []
     all_scores = []
@@ -370,13 +649,36 @@ def postprocess(
     """
     Full postprocessing pipeline: decode, filter, NMS.
 
+    This is the edge equivalent of the host-side postprocessing chain:
+        1. code/yolox/models/yolo_head_q.py :: postprocess() - decode raw outputs
+        2. code/yolox/utils/demo_utils.py :: postprocess() - NMS and filtering
+
+    On the host, these are called by the evaluator:
+        code/yolox/evaluators/coco_evaluator_q.py (lines 180-191)
+
+    Pipeline:
+        DPU outputs (3 raw tensors)
+            |
+            v
+        decode_yolox_outputs() - grid decode, sigmoid, concat
+            |
+            v
+        Confidence filtering - remove low-score detections
+            |
+            v
+        NMS - remove overlapping duplicates
+            |
+            v
+        Final detections [(box, score), ...]
+
     Args:
         outputs: List of raw model outputs from DPU (one per detection head)
-        config: Model configuration
+                 These are dequantized float32 tensors in NHWC format
+        config: Model configuration with thresholds
 
     Returns:
         List of (box, score) tuples for detected bursts
-        Each box is [x1, y1, x2, y2] in pixel coordinates
+        Each box is [x1, y1, x2, y2] in pixel coordinates (0 to input_size)
     """
     # Decode all heads
     boxes, scores = decode_yolox_outputs(outputs, config)
