@@ -31,14 +31,16 @@ stft.frames_per_image      = 128;    % tile width (W); tile height (H)=fft_size
 
 % ------------------------- SIGNAL GENERATION ---------------------
 cfg.seed           = 1;          % RNG for reproducible signal
-cfg.total_duration = 0.025;      % seconds
+cfg.total_duration = 6.000;      % seconds, approx 5000 tiles
 cfg.noise_power_db = -80;        % mean noise power in dB
 
-rngs.freq_min = -5e6; rngs.freq_max = 5e6;
-rngs.snr_min  = 5;    rngs.snr_max  = 40;
+% Add a slight margin to avoid generating signals right on an edge
+rngs.freq_min = -4.5e6; rngs.freq_max = 4.5e6;
+% 5 db is a heuristic "threshold" for CFAR detector, we add a bit more
+rngs.snr_min = -15; rngs.snr_max = 5 + 3;
 
 rngs.pw_min  = 20e-6;  rngs.pw_max  = 120e-6;
-rngs.per_min = 150e-6; rngs.per_max = 600e-6;
+rngs.per_min = 150e-6; rngs.per_max = 400e-6;
 rngs.bw_min  = 0.1e6;  rngs.bw_max  = 2e6;
 
 % explicit overlap policy
