@@ -162,7 +162,7 @@ while t0 < (cfg.total_duration - rngs.pw_min)
     if num_it_log == cfg.how_often_to_log_signal
         fprintf('Generating signal. Time=%.2f | Total duration=%.2f | run_id=%s\n', ...
             t0, cfg.total_duration, run_id);
-        num_it_log = 0;
+        num_it_log = 1;
     else
         num_it_log = num_it_log + 1;
     end
@@ -351,7 +351,7 @@ for k = 1:n_tiles
     if num_it_log == cfg.how_often_to_log_tiles
         fprintf('Writing tiles. Tiles=%d | Total=%d | run_id=%s\n', ...
             k, n_tiles, run_id);
-        num_it_log = 0;
+        num_it_log = 1;
     else
         num_it_log = num_it_log + 1;
     end
