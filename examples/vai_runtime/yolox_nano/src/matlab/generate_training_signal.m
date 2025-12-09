@@ -36,9 +36,10 @@ cfg.noise_power_db = -80;        % mean noise power in dB
 
 rngs.freq_min = -5e6; rngs.freq_max = 5e6;
 rngs.snr_min  = 5;    rngs.snr_max  = 40;
-rngs.pw_min   = 20e-6;  rngs.pw_max = 120e-6; 
-rngs.per_min  = 150e-6; rngs.per_max = 600e-6;
-rngs.bw_min   = 0.1e6;  rngs.bw_max  = 2e6;    
+
+rngs.pw_min  = 20e-6;  rngs.pw_max  = 120e-6;
+rngs.per_min = 150e-6; rngs.per_max = 600e-6;
+rngs.bw_min  = 0.1e6;  rngs.bw_max  = 2e6;
 
 % explicit overlap policy
 overlap.enable = true;
@@ -48,17 +49,19 @@ overlap.jitter = 1.0;        % for 'uniform': dt ~ U((1-j)*per, per), j in [0..1
 
 % pulse shaping & modulation
 edge.rise_s = 10e-6; edge.fall_s = 10e-6;
+
 qpsk.rrc_enable   = true;
 qpsk.rolloff      = 0.35;
 qpsk.span_sym     = 8;
 qpsk.seed_base    = 1234;
 
 % ------------------------- PREPARE DIRS --------------------------
-if ~exist(ds.images_dir, 'dir'), mkdir(ds.images_dir); end
-if ~exist(ds.ann_dir,    'dir'), mkdir(ds.ann_dir);  end
-if ~exist(ds.splits_dir, 'dir'), mkdir(ds.splits_dir); end
-if ~exist(ds.fig_dir,    'dir'), mkdir(ds.fig_dir);   end
-if ~exist(ds.tensors_dir,'dir'), mkdir(ds.tensors_dir); end
+if ~exist(ds.images_dir,  'dir'), mkdir(ds.images_dir); end
+if ~exist(ds.ann_dir,     'dir'), mkdir(ds.ann_dir); end
+if ~exist(ds.splits_dir,  'dir'), mkdir(ds.splits_dir); end
+if ~exist(ds.fig_dir,     'dir'), mkdir(ds.fig_dir); end
+if ~exist(ds.tensors_dir, 'dir'), mkdir(ds.tensors_dir); end
+
 if exist(ds.h5_path,'file'), delete(ds.h5_path); end
 
 % ------------------------- NOISE + PULSES ------------------------
@@ -67,7 +70,7 @@ N_total = round(cfg.total_duration * Fs);
 rng(cfg.seed);
 
 Pn = 10^(cfg.noise_power_db/10);
-x  = sqrt(Pn/2) * (randn(N_total,1) + 1j*randn(N_total,1));  % flat noise over whole record
+x = sqrt(Pn/2) * (randn(N_total,1) + 1j*randn(N_total,1));  % flat noise over whole record
 
 gt = struct('t0',{},'t1',{},'fmin',{},'fmax',{});
 t0 = 0; pulse_idx = 0;
@@ -87,7 +90,7 @@ while t0 < (cfg.total_duration - rngs.pw_min)
     alpha = qpsk.rolloff;
     Rs = max(B/(1+alpha), 1e3);
     sps = max(2, round(Fs/Rs));
-    Rs  = Fs/sps;
+    Rs = Fs/sps;
     B_occ = (1+alpha) * Rs;
 
     f0 = min(max(f0, -Fs/2*0.9 + B_occ/2), Fs/2*0.9 - B_occ/2);
@@ -95,7 +98,7 @@ while t0 < (cfg.total_duration - rngs.pw_min)
     pulse_idx = pulse_idx + 1; rng(qpsk.seed_base + pulse_idx);
     m = randi([0 3], ceil(numel(t_p)/sps), 1);
     map = (1/sqrt(2))*[1+1j; -1+1j; -1-1j; 1-1j];
-    s  = map(m+1);
+    s = map(m+1);
 
     if qpsk.rrc_enable
         h  = rcosdesign(alpha, qpsk.span_sym, sps, 'sqrt');
@@ -141,9 +144,9 @@ while t0 < (cfg.total_duration - rngs.pw_min)
                 t0  = t0 + dt;
             case 'poisson'
                 tau = per; if ~isempty(overlap.step_s), tau = overlap.step_s; end
-                u = rand; if u==0, u = eps; end
-                dt = -tau*log(u);
-                t0 = t0 + dt;
+                u   = rand; if u==0, u = eps; end
+                dt  = -tau*log(u);
+                t0  = t0 + dt;
             otherwise
                 t0 = t0 + per;
         end
@@ -153,8 +156,8 @@ end
 % ------------------------- SAVE IQ RECORD (int16 + float32) -----
 iq_fname_i16 = fullfile(ds.root, sprintf('rec_%s_iq_int16.bin', run_id));
 maxVal = double(intmax('int16'));
-I_i16 = int16(max(min(real(x) * maxVal,  maxVal), -maxVal));
-Q_i16 = int16(max(min(imag(x) * maxVal,  maxVal), -maxVal));
+I_i16 = int16(max(min(real(x) * maxVal, maxVal), -maxVal));
+Q_i16 = int16(max(min(imag(x) * maxVal, maxVal), -maxVal));
 IQ_i16 = zeros(2*numel(I_i16), 1, 'int16');
 IQ_i16(1:2:end) = I_i16;
 IQ_i16(2:2:end) = Q_i16;
@@ -168,10 +171,10 @@ fid_f32 = fopen(iq_fname_f32, 'w'); fwrite(fid_f32, IQ_f32, 'single'); fclose(fi
 
 % ------------------------- STFT (S, F, T) -----------------------
 switch lower(stft.window_type)
-    case 'hann',    win = hann(stft.window_length_samples);
-    case 'hamming', win = hamming(stft.window_length_samples);
-    case 'blackman',win = blackman(stft.window_length_samples);
-    otherwise,      win = hann(stft.window_length_samples);
+    case 'hann',     win = hann(stft.window_length_samples);
+    case 'hamming',  win = hamming(stft.window_length_samples);
+    case 'blackman', win = blackman(stft.window_length_samples);
+    otherwise,       win = hann(stft.window_length_samples);
 end
 if stft.centered
     [S,F,T] = spectrogram(x, win, stft.overlap_samples, stft.fft_size, Fs, 'centered');
@@ -234,13 +237,13 @@ for k = 1:n_tiles
     boxes_for_h5 = [];
 
     for gi = 1:numel(gt)
-        c1 = find(T >= gt(gi).t0, 1, 'first');  if isempty(c1), continue; end
-        c2 = find(T <= gt(gi).t1, 1, 'last');   if isempty(c2), continue; end
+        c1 = find(T >= gt(gi).t0, 1, 'first');   if isempty(c1), continue; end
+        c2 = find(T <= gt(gi).t1, 1, 'last');    if isempty(c2), continue; end
         r1 = find(F >= gt(gi).fmin, 1, 'first'); if isempty(r1), continue; end
         r2 = find(F <= gt(gi).fmax, 1, 'last');  if isempty(r2), continue; end
 
-        x0 = c1 - idx0; x1 = c2 - idx0;     % frames
-        y0 = r1 - 1;    y1 = r2 - 1;       % bins (0-based)
+        x0 = c1 - idx0; x1 = c2 - idx0;  % frames
+        y0 = r1 - 1;    y1 = r2 - 1;     % bins (0-based)
 
         % reject non-intersecting BEFORE clipping
         if x1 < 0 || x0 > (W-1) || y1 < 0 || y0 > (H-1)
