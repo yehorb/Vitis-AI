@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pathlib
+import threading
 import typing as t
 
 import h5py
@@ -17,6 +18,12 @@ if t.TYPE_CHECKING:
 
 class Matlab(Dataset["MatlabDataPoint"]):
     """
+    Multiprocess-safe HDF5 dataset for STFT spectrograms.
+
+    Uses thread-local storage to ensure each DataLoader worker gets its own
+    HDF5 file handle. File handles are opened lazily on first access within
+    each worker process.
+
     Parameters
     ----------
     h5_path : str or Path
@@ -34,16 +41,25 @@ class Matlab(Dataset["MatlabDataPoint"]):
         if isinstance(h5_path, str):
             h5_path = pathlib.Path(h5_path)
         self.h5_path: pathlib.Path = h5_path
-        self._h5: t.Union[None, h5py.File] = None
         self.tile_ids: t.List[str] = list(tile_ids)
+        # Thread-local storage for file handles (one per worker)
+        self._local = threading.local()
 
     def __len__(self):
         return len(self.tile_ids)
 
-    def _get_h5(self):
-        if self._h5 is None:
-            self._h5 = h5py.File(self.h5_path, "r")
-        return self._h5
+    def _get_h5(self) -> h5py.File:
+        """
+        Get HDF5 file handle for current worker.
+
+        Each DataLoader worker process gets its own file handle stored in
+        thread-local storage. This avoids sharing file handles across
+        fork boundaries which causes segfaults.
+        """
+        # Check if we have a handle for this worker
+        if not hasattr(self._local, "h5") or self._local.h5 is None:
+            self._local.h5 = h5py.File(self.h5_path, "r")
+        return self._local.h5
 
     def __getitem__(self, index: int) -> MatlabDataPoint:
         h5 = self._get_h5()
@@ -66,12 +82,28 @@ class Matlab(Dataset["MatlabDataPoint"]):
         return s_db, boxes, tile_id
 
     def close(self):
-        if self._h5 is not None:
-            self._h5.close()
-            self._h5 = None
+        if hasattr(self._local, "h5") and self._local.h5 is not None:
+            self._local.h5.close()
+            self._local.h5 = None
 
     def __del__(self):
         self.close()
+
+    def __getstate__(self):
+        """
+        Prepare for pickling (used when DataLoader spawns workers).
+
+        Exclude the thread-local storage and file handle - each worker
+        will create its own after unpickling.
+        """
+        state = self.__dict__.copy()
+        state["_local"] = None
+        return state
+
+    def __setstate__(self, state):
+        """Restore from pickle, reinitialize thread-local storage."""
+        self.__dict__.update(state)
+        self._local = threading.local()
 
 
 class DiscoverTileIds(Dataset["MatlabDataPoint"]):
