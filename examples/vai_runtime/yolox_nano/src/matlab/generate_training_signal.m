@@ -268,7 +268,11 @@ for gi = 1:n_gt
     gt_r2(gi) = find(F <= gt(gi).fmax, 1, 'last');
 end
 
-% ------------------------- TILE LOOP -----------------------------
+% Extract time bounds as arrays for vectorized tile-overlap filtering
+pulse_start_time = [gt.t0];
+pulse_end_time = [gt.t1];
+
+% ------------------------- TILE LOOP ----------------------------------
 for k = 1:n_tiles
     idx0 = (k-1)*W + 1; idx1 = min(k*W, total_frames);
     tile_id = sprintf('rec_%s_%03d', run_id, k-1);  % no seed in name
@@ -291,26 +295,30 @@ for k = 1:n_tiles
     end
     boxes_for_h5 = [];
 
-    for gi = 1:n_gt
-        % Use precomputed frame/bin indices instead of find()
+    % Find tile time bounds for vectorized pulse filtering
+    tile_start_time = T(idx0);
+    tile_end_time = T(idx1);
+
+    % Vectorized selection: find pulses that overlap this tile temporally
+    % A pulse overlaps if: pulse_end >= tile_start AND pulse_start <= tile_end
+    overlap_mask = (pulse_end_time >= tile_start_time) & (pulse_start_time <= tile_end_time);
+    gi_list = find(overlap_mask);
+
+    % Only iterate over pulses that overlap this tile (typically 3-5 per tile)
+    for gi = gi_list
+        % Use precomputed frame/bin indices
         c1 = gt_c1(gi);
         c2 = gt_c2(gi);
         r1 = gt_r1(gi);
         r2 = gt_r2(gi);
 
         % Convert global frame indices to tile-local x coordinates
-        % idx0 is the first global frame index of this tile
         x0 = c1 - idx0;
         x1 = c2 - idx0;
 
         % Convert bin indices to 0-based y coordinates
         y0 = r1 - 1;
         y1 = r2 - 1;
-
-        % Reject pulses that don't intersect this tile
-        if x1 < 0 || x0 > (W-1) || y1 < 0 || y0 > (H-1)
-            continue;
-        end
 
         % Clip box coordinates to tile boundaries [0, W-1] x [0, H-1]
         x0c = max(0, min(W-1, x0));
