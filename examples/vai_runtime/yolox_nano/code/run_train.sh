@@ -15,7 +15,7 @@
 echo "Conducting training..."
 export CUDA_VISIBLE_DEVICES=0
 GPU_NUM=1
-BATCH=8
+BATCH=512
 
 CFG=code/exps/example/custom/yolox_nano_stft_relu.py
 python -m yolox.tools.train -f ${CFG} -d ${GPU_NUM} -b ${BATCH} --fp16
