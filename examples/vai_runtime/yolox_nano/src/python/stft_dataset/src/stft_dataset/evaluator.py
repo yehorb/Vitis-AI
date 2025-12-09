@@ -122,7 +122,7 @@ class StftEvaluator:
         self.num_classes = num_classes
         self.iou_thre = iou_thre
 
-    def evaluate(self, *args: t.Any) -> t.Union[
+    def evaluate(self, *args: t.Any, **kwargs: t.Any) -> t.Union[
         t.Tuple[float, float, str],
         t.Tuple[t.Tuple[float, float, str], t.Dict[str, t.Any]],
     ]:
@@ -158,10 +158,27 @@ class StftEvaluator:
             Per-image predictions (if return_outputs=True).
         """
 
+        # Test mode:
+        #  code/tools/eval.py, line 197
         if len(args) == 6:
             params = EvaluatorParams(*args)  # pyright: ignore[reportAny]
+        # Quantization mode:
+        #  code/tools/quant.py, line 238
         elif len(args) == 9:
             params = QEvaluatorParams(*args)  # pyright: ignore[reportAny]
+        # Training mode:
+        #   code/yolox/core/trainer.py, line 330
+        #   code/yolox/exp/yolox_base.py, line 322
+        elif len(args) == 3 and len(kwargs) == 1:  # pyright: ignore[reportAny]
+            params = EvaluatorParams(
+                args[0],
+                args[1],
+                args[2],
+                None,
+                None,
+                None,
+                kwargs["return_outputs"],
+            )
         else:
             raise AttributeError(
                 f"Unexpected call to evaluate() with {len(args)} params"
