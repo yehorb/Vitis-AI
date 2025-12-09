@@ -272,6 +272,19 @@ end
 pulse_start_time = [gt.t0];
 pulse_end_time = [gt.t1];
 
+% ------------------------- OPEN HDF5 FOR TILE WRITES -----------------
+% Use low-level HDF5 API for performance: open file once, write all tiles,
+% then close. High-level h5write opens/closes the file on each call.
+
+% Create groups for tiles using high-level API (only done once)
+h5_file_id = H5F.open(ds.h5_path, 'H5F_ACC_RDWR', 'H5P_DEFAULT');
+
+s_db_group_id = H5G.create(h5_file_id, '/S_db', 'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
+boxes_group_id = H5G.create(h5_file_id, '/boxes', 'H5P_DEFAULT', 'H5P_DEFAULT', 'H5P_DEFAULT');
+
+H5G.close(s_db_group_id);
+H5G.close(boxes_group_id);
+
 % ------------------------- TILE LOOP ----------------------------------
 for k = 1:n_tiles
     idx0 = (k-1)*W + 1; idx1 = min(k*W, total_frames);
@@ -343,16 +356,16 @@ for k = 1:n_tiles
         fclose(fid);
     end
 
-    dset_S = ['/S_db/' char(tile_id)];
-    dset_B = ['/boxes/' char(tile_id)];
-    h5create_safe(ds.h5_path, dset_S, size(SdBk), 'single', [H, min(W, size(SdBk,2))], 4);
-    h5write(ds.h5_path, dset_S, SdBk);
+    dset_S = char(tile_id);
+    dset_B = char(tile_id);
+
+    % Write spectrogram tile using low-level API
+    h5_write_dataset(h5_file_id, '/S_db', dset_S, SdBk, 'single', 4);
 
     % Only create boxes dataset if there are boxes
     if ~isempty(boxes_for_h5)
         boxes_mat = int32(boxes_for_h5);
-        h5create_safe(ds.h5_path, dset_B, size(boxes_mat), 'int32', [size(boxes_mat,1), 4], 1);
-        h5write(ds.h5_path, dset_B, boxes_mat);
+        h5_write_dataset(h5_file_id, '/boxes', dset_B, boxes_mat, 'int32', 1);
     end
 
     if num_it_log == cfg.how_often_to_log_tiles
@@ -363,6 +376,9 @@ for k = 1:n_tiles
         num_it_log = num_it_log + 1;
     end
 end
+
+% Close HDF5 file after all tile writes
+H5F.close(h5_file_id);
 
 % ------------------------- META + LABEL MAP (JSON) ---------------
 meta = struct( ...
@@ -444,4 +460,53 @@ args = {'Datatype', dtype};
 if ~isempty(chunks), args = [args, {'ChunkSize', chunks}]; end
 if ~isempty(deflate) && deflate>0, args = [args, {'Deflate', deflate}]; end
 h5create(h5path, dset, sz, args{:});
+end
+
+function h5_write_dataset(file_id, group_path, dset_name, data, dtype, deflate_level)
+% Write a dataset to an open HDF5 file using low-level API.
+% This avoids the overhead of h5write which opens/closes the file each call.
+%
+% Parameters:
+%   file_id      - HDF5 file identifier (from H5F.open)
+%   group_path   - Parent group path (e.g., '/S_db')
+%   dset_name    - Dataset name within the group
+%   data         - Data to write
+%   dtype        - 'single' or 'int32'
+%   deflate_level - Compression level (0-9), 0 = no compression
+
+% Get HDF5 type
+switch dtype
+    case 'single'
+        h5_type = 'H5T_NATIVE_FLOAT';
+    case 'int32'
+        h5_type = 'H5T_NATIVE_INT32';
+    otherwise
+        error('Unsupported dtype: %s', dtype);
+end
+
+% Data dimensions (MATLAB is column-major, HDF5 is row-major, so flip)
+dims = fliplr(size(data));
+
+% Create dataspace
+space_id = H5S.create_simple(numel(dims), dims, dims);
+
+% Create dataset creation property list with chunking and compression
+dcpl_id = H5P.create('H5P_DATASET_CREATE');
+if deflate_level > 0
+    H5P.set_chunk(dcpl_id, dims);
+    H5P.set_deflate(dcpl_id, deflate_level);
+end
+
+% Open parent group and create dataset
+group_id = H5G.open(file_id, group_path);
+dset_id = H5D.create(group_id, dset_name, h5_type, space_id, dcpl_id);
+
+% Write data
+H5D.write(dset_id, 'H5ML_DEFAULT', 'H5S_ALL', 'H5S_ALL', 'H5P_DEFAULT', data);
+
+% Cleanup
+H5D.close(dset_id);
+H5G.close(group_id);
+H5P.close(dcpl_id);
+H5S.close(space_id);
 end
