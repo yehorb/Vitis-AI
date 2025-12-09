@@ -411,10 +411,10 @@ end
 hold off; xlabel('Time (s)'); ylabel('Frequency (Hz)'); title('STFT Full + GT Boxes');
 savefig(f2, fullfile(ds.fig_dir,'stft_full_boxes.fig'));
 saveas(f2, fullfile(ds.fig_dir,'stft_full_boxes.png'));
+end
 
 fprintf('Done. Tiles=%d | train=%d val=%d test=%d | overlap=%d (%s) | run_id=%s\n', ...
     N, numel(train_ids), numel(val_ids), numel(test_ids), overlap.enable, overlap.mode, run_id);
-end
 
 % ------------------------- HELPERS -------------------------------
 function write_list(path, arr)
