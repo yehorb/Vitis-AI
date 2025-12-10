@@ -17,7 +17,7 @@ export CUDA_VISIBLE_DEVICES=0
 GPU_NUM=1
 BATCH=1024
 
-CFG=code/exps/example/custom/yolox_nano_stft_relu.py
+CFG=code/exps/example/custom/yolox_tiny_stft_relu.py
 
 set -ex
 python -m yolox.tools.train -f ${CFG} -d ${GPU_NUM} -b ${BATCH} --fp16
