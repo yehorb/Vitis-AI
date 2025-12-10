@@ -202,14 +202,18 @@ class StftEvaluator:
         output_data: t.Dict[str, t.Any] = {}
 
         with torch.no_grad():
-            for batch_idx, (imgs, targets) in enumerate(self.dataloader):
-                imgs = params.to_device(imgs, dtype)
-                batch_size = imgs.shape[0]
+            for batch_idx, (imgs_batch, labels_batch, tile_ids_batch) in enumerate(
+                self.dataloader
+            ):
+                del tile_ids_batch  # unused
+
+                imgs_batch = params.to_device(imgs_batch, dtype)
+                batch_size = imgs_batch.shape[0]
                 n_samples += batch_size
 
                 # Inference
                 start = time.time()
-                outputs = model(imgs)
+                outputs = model(imgs_batch)
                 inference_time += time.time() - start
 
                 if params.should_exit_early():
@@ -228,7 +232,7 @@ class StftEvaluator:
 
                 # Match predictions to ground truth for each image
                 for i in range(batch_size):
-                    gt_boxes = self._extract_gt_boxes(targets[i])
+                    gt_boxes = self._extract_gt_boxes(labels_batch[i])
                     pred_boxes = self._extract_pred_boxes(outputs[i])
 
                     tp, fp, fn = self._match_boxes(pred_boxes, gt_boxes)
@@ -288,13 +292,13 @@ class StftEvaluator:
             return (recall, precision, summary), output_data
         return recall, precision, summary
 
-    def _extract_gt_boxes(self, targets: torch.Tensor) -> torch.Tensor:
+    def _extract_gt_boxes(self, labels: torch.Tensor) -> torch.Tensor:
         """
-        Extract ground truth boxes from targets tensor.
+        Extract ground truth boxes from labels tensor.
 
         Parameters
         ----------
-        targets : torch.Tensor
+        labels : torch.Tensor
             Shape [max_labels, 5] with format (class_id, cx, cy, w, h).
             Zero-padded rows have sum == 0.
 
@@ -304,11 +308,11 @@ class StftEvaluator:
             Shape [N, 4] in xyxy format, on same device as input.
         """
         # Filter out zero-padded rows
-        valid_mask = targets.sum(dim=1) > 0
-        valid_targets = targets[valid_mask]
+        valid_mask = labels.sum(dim=1) > 0
+        valid_targets = labels[valid_mask]
 
         if len(valid_targets) == 0:
-            return torch.empty((0, 4), device=targets.device)
+            return torch.empty((0, 4), device=labels.device)
 
         # Convert cxcywh to xyxy
         cx = valid_targets[:, 1]
