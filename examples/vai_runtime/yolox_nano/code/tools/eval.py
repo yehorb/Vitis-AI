@@ -104,6 +104,14 @@ def make_parser():
         help="speed test only.",
     )
     parser.add_argument(
+        "-v",
+        "--verbose",
+        dest="verbose",
+        default=False,
+        action="store_true",
+        help="Print more information about the model.",
+    )
+    parser.add_argument(
         "opts",
         help="Modify config options using the command-line",
         default=None,
@@ -146,12 +154,11 @@ def main(exp, args, num_gpu):
         exp.test_size = (args.tsize, args.tsize)
 
     model = exp.get_model()
-    logger.info(
-        "Model Summary: {}".format(
-            get_model_info(model, exp.test_size, getattr(exp, "input_channels", 3))
-        )
-    )
-    logger.info("Model Structure:\n{}".format(str(model)))
+
+    if args.verbose:
+        info = get_model_info(model, exp.test_size, getattr(exp, "input_channels", 3))
+        logger.info("Model Summary: {}".format(info))
+        logger.info("Model Structure:\n{}".format(str(model)))
 
     evaluator = exp.get_evaluator(
         args.batch_size, is_distributed, args.test, args.legacy
