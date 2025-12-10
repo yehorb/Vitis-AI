@@ -3,6 +3,7 @@
     "./code/",
     "./src/edge/"
   ],
+  "reportImplicitStringConcatenation": false,
   "reportMissingTypeStubs": false,
   "reportUnannotatedClassAttribute": false,
   "reportUnusedCallResult": false
