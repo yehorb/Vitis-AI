@@ -220,7 +220,7 @@ class StftEvaluator:
                 outputs = params.postprocess(is_parallel, outputs)
 
                 # Everything down from here is just post-processing
-                inference_results.append((imgs_batch, labels_batch, outputs))
+                inference_results.append((labels_batch, outputs))
 
             stats = PredictionStats()
             for batch_idx, batch in enumerate(inference_results):
@@ -417,8 +417,8 @@ class PredictionStats:
 def evaluate_batch(
     batch_idx: int, batch: t.Tuple[torch.Tensor, ...], cfg: EvaluationConfig
 ):
-    imgs_batch, labels_batch, outputs = batch
-    batch_size = imgs_batch.shape[0]
+    labels_batch, outputs = batch
+    batch_size = labels_batch.shape[0]
 
     # Apply NMS
     outputs = utils.postprocess(
