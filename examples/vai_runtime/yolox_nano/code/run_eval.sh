@@ -20,6 +20,7 @@ export LD_LIBRARY_PATH=${PWD}/code:${LD_LIBRARY_PATH}
 BATCH=2048
 CFG=code/exps/example/custom/yolox_nano_stft_relu.py
 CKPT=./YOLOX_outputs/yolox_nano_stft_relu/best_ckpt.pth
+CONF="${CONF:-0.25}"
 
 set -ex
-python -m yolox.tools.eval -f ${CFG} -c ${CKPT} -b ${BATCH} -d ${GPU_NUM} --conf 0.25
+python -m yolox.tools.eval -f ${CFG} -c ${CKPT} -b ${BATCH} -d ${GPU_NUM} --conf ${CONF}
