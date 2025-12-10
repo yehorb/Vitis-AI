@@ -6,12 +6,11 @@ import argparse
 import os
 import random
 import warnings
-from loguru import logger
 
 import torch
 import torch.backends.cudnn as cudnn
+from loguru import logger
 from torch.nn.parallel import DistributedDataParallel as DDP
-
 from yolox.core import launch
 from yolox.exp import get_exp
 from yolox.utils import (
@@ -22,6 +21,20 @@ from yolox.utils import (
     get_model_info,
     setup_logger,
 )
+
+
+def parse_range(range_str: str) -> "list[float]":
+    """Parse 'start,end,step' string into list of float values."""
+    parts = range_str.split(",")
+    if len(parts) != 3:
+        raise ValueError(f"Expected 'start,end,step' format, got: {range_str}")
+    start, end, step = float(parts[0]), float(parts[1]), float(parts[2])
+    values = []
+    v = start
+    while v <= end + 1e-9:  # small epsilon for float comparison
+        values.append(round(v, 4))
+        v += step
+    return values
 
 
 def make_parser():
@@ -59,6 +72,33 @@ def make_parser():
     parser.add_argument("-c", "--ckpt", default=None, type=str, help="ckpt for eval")
     parser.add_argument("--conf", default=None, type=float, help="test conf")
     parser.add_argument("--nms", default=None, type=float, help="test nms threshold")
+    # Threshold tuning arguments
+    parser.add_argument(
+        "--tune",
+        dest="tune",
+        default=False,
+        action="store_true",
+        help="Enable threshold tuning mode. Sweeps over conf/nms ranges.",
+    )
+    parser.add_argument(
+        "--conf-range",
+        type=str,
+        default="0.1,0.5,0.1",
+        help="Conf threshold range for tuning: start,end,step (default: 0.1,0.5,0.1)",
+    )
+    parser.add_argument(
+        "--nms-range",
+        type=str,
+        default="0.3,0.7,0.1",
+        help="NMS threshold range for tuning: start,end,step (default: 0.3,0.7,0.1)",
+    )
+    parser.add_argument(
+        "--tune-metric",
+        type=str,
+        default="f1",
+        choices=["f1", "recall", "precision"],
+        help="Metric to optimize during tuning (default: f1)",
+    )
     parser.add_argument("--tsize", default=None, type=int, help="test img size")
     parser.add_argument("--seed", default=None, type=int, help="eval seed")
     parser.add_argument(
@@ -201,6 +241,87 @@ def main(exp, args, num_gpu):
     else:
         trt_file = None
         decoder = None
+
+    # Tuning mode: sweep over conf/nms combinations
+    if args.tune:
+        import typing as t
+
+        from stft_dataset.evaluator import StftEvaluator
+        from tabulate import tabulate
+
+        if not isinstance(evaluator, StftEvaluator):
+            logger.error(
+                "Tuning mode requires StftEvaluator. "
+                "Make sure your experiment uses StftEvaluator."
+            )
+            return
+
+        conf_values = parse_range(args.conf_range)
+        nms_values = parse_range(args.nms_range)
+
+        logger.info(
+            f"Tuning mode: {len(conf_values)} conf x {len(nms_values)} nms = "
+            f"{len(conf_values) * len(nms_values)} combinations"
+        )
+        logger.info(f"  conf: {conf_values}")
+        logger.info(f"  nms: {nms_values}")
+        logger.info(f"  metric: {args.tune_metric}")
+
+        # Phase 1: Run inference and cache outputs
+        logger.info("Phase 1: Running inference...")
+
+        model = model.eval()
+        if args.fp16:
+            model = model.half()
+        dtype = torch.float16 if args.fp16 else torch.float32
+
+        with torch.no_grad():
+            inference_results = evaluator.run_inference(model, dtype)
+            logger.info(f"Cached {len(inference_results)} batches")
+
+            # Phase 2: Sweep thresholds
+            logger.info("Phase 2: Sweeping thresholds...")
+            best_result, all_results = evaluator.tune_thresholds(
+                inference_results,
+                conf_values,
+                nms_values,
+                logger,
+                metric=args.tune_metric,
+            )
+
+        # Format results table
+        table_data: t.List[t.List[str]] = []
+        for r in all_results:
+            is_best = r.conf == best_result.conf and r.nms == best_result.nms
+            marker = " *" if is_best else ""
+            table_data.append(
+                [
+                    f"{r.conf:.2f}",
+                    f"{r.nms:.2f}",
+                    f"{r.precision * 100:.2f}",
+                    f"{r.recall * 100:.2f}",
+                    f"{r.f1 * 100:.2f}{marker}",
+                ]
+            )
+
+        headers = ["conf", "nms", "P (%)", "R (%)", "F1 (%)"]
+        results_table = tabulate(table_data, headers=headers, tablefmt="pipe")
+
+        logger.info("\n" + "=" * 60)
+        logger.info("Threshold Tuning Results")
+        logger.info("=" * 60)
+        logger.info("\n" + results_table)
+        logger.info("\n" + "=" * 60)
+        logger.info(
+            f"Best ({args.tune_metric}): conf={best_result.conf:.2f}, "
+            f"nms={best_result.nms:.2f}, "
+            f"P={best_result.precision * 100:.2f}%, "
+            f"R={best_result.recall * 100:.2f}%, "
+            f"F1={best_result.f1 * 100:.2f}%"
+        )
+        logger.info("=" * 60)
+
+        return
 
     # start evaluate
     *_, summary = evaluator.evaluate(

@@ -263,6 +263,103 @@ class StftEvaluator:
             return (recall, precision, summary), output_data
         return recall, precision, summary
 
+    def run_inference(
+        self,
+        model: torch.nn.Module,
+        dtype: torch.dtype,
+    ) -> t.List[t.Tuple[torch.Tensor, torch.Tensor]]:
+        """
+        Run inference on validation set and cache raw outputs.
+
+        This separates inference from post-processing, enabling threshold
+        tuning without re-running the model.
+
+        Parameters
+        ----------
+        model : nn.Module
+            Model to evaluate (will be set to eval mode).
+
+        Returns
+        -------
+        inference_results : list
+            List of (labels_batch, raw_outputs) tuples for each batch.
+        """
+        inference_results: t.List[t.Tuple[torch.Tensor, torch.Tensor]] = []
+
+        for imgs_batch, labels_batch in self.dataloader:
+            imgs_batch = imgs_batch.to(dtype=dtype, device="cuda")
+            outputs = model(imgs_batch)
+            # Clone to avoid issues with in-place operations during postprocess
+            inference_results.append((labels_batch, outputs.clone()))
+
+        return inference_results
+
+    def tune_thresholds(
+        self,
+        inference_results: t.List[t.Tuple[torch.Tensor, torch.Tensor]],
+        conf_values: t.List[float],
+        nms_values: t.List[float],
+        logger: t.Any,
+        metric: str = "f1",
+    ) -> t.Tuple["EvaluationSnapshot", t.List["EvaluationSnapshot"]]:
+        """
+        Sweep over conf/nms combinations using cached inference results.
+
+        Parameters
+        ----------
+        inference_results : list
+            Output from run_inference().
+        conf_values : list of float
+            Confidence thresholds to try.
+        nms_values : list of float
+            NMS thresholds to try.
+        metric : str
+            Metric to optimize: 'f1', 'recall', or 'precision'.
+
+        Returns
+        -------
+        best_result : EvaluationSnapshot
+            Best result according to specified metric.
+        all_results : list of EvaluationSnapshot
+            All results sorted by metric (descending).
+        """
+        import itertools
+
+        results: t.List[EvaluationSnapshot] = []
+
+        to_check = list(itertools.product(conf_values, nms_values))
+        for i, (conf_thre, nms_thre) in enumerate(to_check):
+            cfg = EvaluationConfig(self.num_classes, conf_thre, nms_thre, self.iou_thre)
+
+            stats = PredictionStats()
+            for batch_idx, batch in enumerate(inference_results):
+                batch_stats, _ = evaluate_batch(batch_idx, batch, cfg)
+                stats += batch_stats
+
+            result = EvaluationSnapshot(conf=conf_thre, nms=nms_thre, stats=stats)
+            results.append(result)
+
+            logger.info(
+                f"Phase 2: {i+1}/{len(to_check)} conf({conf_thre}) nms({nms_thre}) done. {result}"
+            )
+
+        # Sort by metric (descending)
+        if metric == "f1":
+            key_fn = lambda r: r.f1()
+        elif metric == "recall":
+            key_fn = lambda r: r.recall()
+        elif metric == "precision":
+            key_fn = lambda r: r.precision()
+        else:
+            raise ValueError(
+                f"Unknown metric: {metric}. Use 'f1', 'recall', or 'precision'."
+            )
+
+        results.sort(key=key_fn, reverse=True)
+        best_result = results[0]
+
+        return best_result, results
+
 
 def extract_gt_boxes(labels: torch.Tensor) -> torch.Tensor:
     """
