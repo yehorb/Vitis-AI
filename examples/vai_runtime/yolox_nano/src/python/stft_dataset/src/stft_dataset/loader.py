@@ -39,6 +39,7 @@ def stft_collate_fn(
     """
     imgs_list: t.Tuple[npt.NDArray[np.float32], ...] = ()
     labels_list: t.Tuple[npt.NDArray[np.float32], ...] = ()
+    # Drop tile_ids - unused in training
     imgs_list, labels_list, _ = zip(*batch)
 
     # Stack images: list of [1, H, W] -> [B, 1, H, W]

@@ -202,11 +202,8 @@ class StftEvaluator:
         output_data: t.Dict[str, t.Any] = {}
 
         with torch.no_grad():
-            for batch_idx, (imgs_batch, labels_batch, tile_ids_batch) in enumerate(
-                self.dataloader
-            ):
-                del tile_ids_batch  # unused
-
+            # 2 values to unpack, tile_ids are dropped in dataloader
+            for batch_idx, (imgs_batch, labels_batch) in enumerate(self.dataloader):
                 imgs_batch = params.to_device(imgs_batch, dtype)
                 batch_size = imgs_batch.shape[0]
                 n_samples += batch_size
