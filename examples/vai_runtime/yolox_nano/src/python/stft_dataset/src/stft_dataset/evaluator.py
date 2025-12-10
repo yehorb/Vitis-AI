@@ -267,7 +267,7 @@ class StftEvaluator:
         self,
         model: torch.nn.Module,
         dtype: torch.dtype,
-    ) -> t.List[t.Tuple[torch.Tensor, torch.Tensor]]:
+    ) -> t.List[t.Tuple[t.List[torch.Tensor], torch.Tensor]]:
         """
         Run inference on validation set and cache raw outputs.
 
@@ -282,21 +282,29 @@ class StftEvaluator:
         Returns
         -------
         inference_results : list
-            List of (labels_batch, raw_outputs) tuples for each batch.
+            List of (gt_boxes_list, raw_outputs) tuples for each batch.
+            gt_boxes_list is a list of pre-extracted GT boxes per image.
         """
-        inference_results: t.List[t.Tuple[torch.Tensor, torch.Tensor]] = []
+        inference_results: t.List[t.Tuple[t.List[torch.Tensor], torch.Tensor]] = []
 
         for imgs_batch, labels_batch in self.dataloader:
             imgs_batch = imgs_batch.to(dtype=dtype, device="cuda")
             outputs = model(imgs_batch)
-            # Clone to avoid issues with in-place operations during postprocess
-            inference_results.append((labels_batch, outputs.clone()))
+
+            # Pre-extract GT boxes once (optimization: avoid repeated extraction during tuning)
+            batch_size = labels_batch.shape[0]
+            gt_boxes_list = [
+                extract_gt_boxes(labels_batch[i]) for i in range(batch_size)
+            ]
+
+            # Clone outputs to avoid issues with in-place operations during postprocess
+            inference_results.append((gt_boxes_list, outputs.clone()))
 
         return inference_results
 
     def tune_thresholds(
         self,
-        inference_results: t.List[t.Tuple[torch.Tensor, torch.Tensor]],
+        inference_results: t.List[t.Tuple[t.List[torch.Tensor], torch.Tensor]],
         conf_values: t.List[float],
         nms_values: t.List[float],
         logger: t.Any,
@@ -308,7 +316,7 @@ class StftEvaluator:
         Parameters
         ----------
         inference_results : list
-            Output from run_inference().
+            Output from run_inference(). Each element is (gt_boxes_list, raw_outputs).
         conf_values : list of float
             Confidence thresholds to try.
         nms_values : list of float
@@ -333,7 +341,7 @@ class StftEvaluator:
 
             stats = PredictionStats()
             for batch_idx, batch in enumerate(inference_results):
-                batch_stats, _ = evaluate_batch(batch_idx, batch, cfg)
+                batch_stats = evaluate_batch_tuning(batch_idx, batch, cfg)
                 stats += batch_stats
 
             result = EvaluationSnapshot(conf=conf_thre, nms=nms_thre, stats=stats)
@@ -345,11 +353,11 @@ class StftEvaluator:
 
         # Sort by metric (descending)
         if metric == "f1":
-            key_fn = lambda r: r.f1()
+            key_fn = lambda r: r.f1
         elif metric == "recall":
-            key_fn = lambda r: r.recall()
+            key_fn = lambda r: r.recall
         elif metric == "precision":
-            key_fn = lambda r: r.precision()
+            key_fn = lambda r: r.precision
         else:
             raise ValueError(
                 f"Unknown metric: {metric}. Use 'f1', 'recall', or 'precision'."
@@ -574,3 +582,51 @@ def evaluate_batch(
         }
 
     return stats, output_data
+
+
+def evaluate_batch_tuning(
+    batch_idx: int,
+    batch: t.Tuple[t.List[torch.Tensor], torch.Tensor],
+    cfg: EvaluationConfig,
+) -> PredictionStats:
+    """
+    Evaluate a batch for threshold tuning (optimized version).
+
+    This version uses pre-extracted GT boxes and skips output_data generation
+    for faster threshold sweeping.
+
+    Parameters
+    ----------
+    batch_idx : int
+        Batch index (unused, kept for API consistency).
+    batch : tuple
+        (gt_boxes_list, raw_outputs) where gt_boxes_list is a list of
+        pre-extracted GT boxes per image.
+    cfg : EvaluationConfig
+        Configuration with thresholds.
+
+    Returns
+    -------
+    stats : PredictionStats
+        Aggregated statistics for the batch.
+    """
+    del batch_idx  # unused
+
+    gt_boxes_list, outputs = batch
+
+    # Apply NMS (need to clone since postprocess modifies in-place)
+    outputs = utils.postprocess(
+        outputs.clone(),
+        cfg.num_classes,
+        cfg.confthre,
+        cfg.nmsthre,
+        class_agnostic=True,
+    )
+
+    stats = PredictionStats()
+    for i, gt_boxes in enumerate(gt_boxes_list):
+        pred_boxes = extract_pred_boxes(outputs[i])
+        sample_stats = match_boxes(pred_boxes, gt_boxes, cfg)
+        stats += sample_stats
+
+    return stats
