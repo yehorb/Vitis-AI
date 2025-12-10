@@ -52,7 +52,7 @@ from pathlib import Path
 import numpy as np
 import torch
 from stft_dataset import LoadSplit, Matlab, StftDataset
-from stft_dataset.normalization import load_normalization_params
+from stft_dataset.normalization import load_normalization_params, Normalize
 from stft_dataset.vis import labels_to_xyxy, visualize_detections
 from yolox.exp import get_exp
 from yolox.utils import fuse_model, postprocess
@@ -220,9 +220,7 @@ def load_model(
 
 def run_inference(
     model: nn.Module,
-    spectrogram: npt.NDArray[np.floating[t.Any]],
-    vmin_db: float,
-    vmax_db: float,
+    img: npt.NDArray[np.float32],
     num_classes: int,
     conf_thre: float,
     nms_thre: float,
@@ -235,8 +233,9 @@ def run_inference(
     ----------
     model : nn.Module
         YOLOX model.
-    spectrogram : ndarray
-        Raw spectrogram [H, W] in dB scale.
+    img : ndarray
+        Normalized spectrogram [1, H, W] in dB scale.
+        Should be sourced directly from Normalized(StftDataset())
     vmin_db : float
         Minimum dB value for normalization.
     vmax_db : float
@@ -255,12 +254,11 @@ def run_inference(
     detections : list of (box, score) tuples
         Each box is [4] xyxy format, score is float.
     """
-    # Normalize to [0, 1] - this is what the model expects
-    normalized = (spectrogram - vmin_db) / (vmax_db - vmin_db)
-    normalized = np.clip(normalized, 0.0, 1.0).astype(np.float32)
 
-    # To tensor: [H, W] -> [1, 1, H, W]
-    img_tensor = torch.from_numpy(normalized).unsqueeze(0).unsqueeze(0)
+    # Add dimension for batch size (of 1)
+    # img_tensor.shape ~ [1,          1,        W, H]
+    #                    [batch_size, channels, W, H]
+    img_tensor = torch.from_numpy(img).unsqueeze(0)
 
     if device == "cuda" and torch.cuda.is_available():
         img_tensor = img_tensor.cuda()
@@ -328,6 +326,7 @@ def main() -> None:
             indices = list(range(min(args.num_samples, len(dataset))))
 
         print(f"Dataset: {len(dataset)} samples from {args.split} split")
+    normalized = Normalize(dataset, vmin_db, vmax_db)
 
     # Load model if checkpoint provided
     model: t.Optional[nn.Module] = None
@@ -348,17 +347,15 @@ def main() -> None:
     # Process each tile
     for idx in indices:
         # Load tile: img is [1, H, W] in dB, labels is [N, 5]
-        img, labels, tile_id = dataset[idx]
-
-        # Remove channel dimension for visualization: [1, H, W] -> [H, W]
-        spectrogram = img[0]
+        raw_img, labels, tile_id = dataset[idx]
+        norm_img = normalized._normalize(raw_img)
 
         # Convert labels to xyxy format for visualization
         gt_boxes = labels_to_xyxy(labels)
 
         print(f"\nTile: {tile_id}")
-        print(f"  Shape: {spectrogram.shape}")
-        print(f"  Value range: [{spectrogram.min():.1f}, {spectrogram.max():.1f}] dB")
+        print(f"  Shape: {raw_img.shape}")
+        print(f"  Value range: [{raw_img.min():.1f}, {raw_img.max():.1f}] dB")
         print(f"  Ground truth boxes: {len(gt_boxes)}")
 
         # Run inference if model is available
@@ -366,9 +363,7 @@ def main() -> None:
         if model is not None:
             predictions = run_inference(
                 model,
-                spectrogram,
-                vmin_db,
-                vmax_db,
+                norm_img,
                 exp.num_classes,
                 args.conf,
                 args.nms,
@@ -392,7 +387,7 @@ def main() -> None:
 
         # Visualize
         visualize_detections(
-            spectrogram=spectrogram,
+            spectrogram=raw_img[0],
             gt_boxes=gt_boxes if len(gt_boxes) > 0 else None,
             predictions=predictions,
             display_mode=args.display,  # type: ignore[arg-type]
