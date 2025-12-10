@@ -151,3 +151,70 @@ class RandomVerticalFlip(Dataset[T], t.Generic[T]):
             labels_flipped = labels
 
         return img_flipped, labels_flipped
+
+
+class GaussianNoiseAugmentation(Dataset[T], t.Generic[T]):
+    """
+    Dataset decorator that adds Gaussian noise to spectrograms.
+
+    This helps the model generalize to lower SNR signals by training
+    on noisier versions of the data.
+
+    Parameters
+    ----------
+    dataset : Dataset[T]
+        Underlying dataset yielding (img, labels, ...) tuples.
+        - img: [C, H, W] array, normalized to [0, 1]
+        - labels: [N, 5] array with columns [class_id, cx, cy, w, h]
+    noise_prob : float
+        Probability of applying noise augmentation (default: 0.3).
+    std_range : tuple of float
+        Range of noise standard deviation (min, max).
+        Values are sampled uniformly from this range.
+
+    Example
+    -------
+    >>> base = Normalize(StftDataset(...), vmin, vmax)
+    >>> augmented = GaussianNoiseAugmentation(base, noise_prob=0.3, std_range=(0.01, 0.05))
+    >>> img, labels, tile_id = augmented[0]
+    """
+
+    def __init__(
+        self,
+        dataset: Dataset[T],
+        noise_prob: float = 0.3,
+        std_range: t.Tuple[float, float] = (0.01, 0.05),
+    ):
+        self.dataset: Dataset[T] = dataset
+        self.noise_prob: float = noise_prob
+        self.std_min: float = std_range[0]
+        self.std_max: float = std_range[1]
+
+    def __len__(self) -> int:
+        return len(self.dataset)  # type: ignore[arg-type]
+
+    def __getitem__(self, index: int) -> T:
+        item = self.dataset[index]
+        img = item[0]
+
+        if np.random.random() < self.noise_prob:
+            img = self._add_noise(img)
+
+        return (img, *item[1:])  # type: ignore[return-value]
+
+    def _add_noise(
+        self,
+        img: npt.NDArray[np.float32],
+    ) -> npt.NDArray[np.float32]:
+        """Add Gaussian noise to image."""
+        # Sample noise std uniformly from range
+        std = np.random.uniform(self.std_min, self.std_max)
+
+        # Add Gaussian noise
+        noise = np.random.randn(*img.shape).astype(np.float32) * std
+        img_noisy = img + noise
+
+        # Clip to valid range [0, 1]
+        img_noisy = np.clip(img_noisy, 0.0, 1.0)
+
+        return img_noisy.astype(np.float32)
