@@ -41,7 +41,7 @@ class EvaluatorParams:
     def exit_early(self, params: t.Dict[int, t.Any]):
         return (0, 0, None), params
 
-    def postprocess(self, is_parallel: bool, outputs: t.Any):
+    def postprocess(self, is_parallel: bool, outputs: torch.Tensor) -> torch.Tensor:
         del is_parallel  # unused
         return outputs
 
@@ -73,7 +73,7 @@ class QEvaluatorParams:
             return (0, 0, None), params
         return (0, 0, None), ""
 
-    def postprocess(self, is_parallel: bool, outputs: t.Any):
+    def postprocess(self, is_parallel: bool, outputs: torch.Tensor) -> torch.Tensor:
         if is_parallel:
             return self.float_model.module.head.postprocess(outputs)
         else:
@@ -220,11 +220,11 @@ class StftEvaluator:
                 outputs = params.postprocess(is_parallel, outputs)
 
                 # Everything down from here is just post-processing
-                inference_results.append((labels_batch, outputs))
+                # Clone to avoid issues with in-place operations during postprocess
+                inference_results.append((labels_batch, outputs.clone()))
 
             stats = PredictionStats()
             for batch_idx, batch in enumerate(inference_results):
-
                 # Match predictions to ground truth for each image
                 batch_stats, batch_output = evaluate_batch(
                     batch_idx,
