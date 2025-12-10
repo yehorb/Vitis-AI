@@ -38,7 +38,7 @@ class EvaluatorParams:
     def should_dump_xmodel(self):
         return False
 
-    def exit_early(self, params: t.Dict[str, t.Any]):
+    def exit_early(self, params: t.Dict[int, t.Any]):
         return (0, 0, None), params
 
     def postprocess(self, is_parallel: bool, outputs: t.Any):
@@ -68,7 +68,7 @@ class QEvaluatorParams:
     def should_dump_xmodel(self):
         return self.is_dump
 
-    def exit_early(self, params: t.Dict[str, t.Any]):
+    def exit_early(self, params: t.Dict[int, t.Any]):
         if self.return_outputs:
             return (0, 0, None), params
         return (0, 0, None), ""
@@ -124,7 +124,7 @@ class StftEvaluator:
 
     def evaluate(self, *args: t.Any, **kwargs: t.Any) -> t.Union[
         t.Tuple[float, float, str],
-        t.Tuple[t.Tuple[float, float, str], t.Dict[str, t.Any]],
+        t.Tuple[t.Tuple[float, float, str], t.Dict[int, t.Any]],
     ]:
         """
         Run evaluation on validation set.
@@ -190,17 +190,11 @@ class StftEvaluator:
         dtype = torch.float16 if params.half else torch.float32
         is_parallel = utils.is_parallel(model)
 
-        total_tp = 0
-        total_fp = 0
-        total_fn = 0
-        total_gt = 0
-        total_pred = 0
-
         inference_time = 0.0
         n_samples = 0
 
         inference_results: t.List[t.Tuple[torch.Tensor, ...]] = []
-        output_data: t.Dict[str, t.Any] = {}
+        output_data: t.Dict[int, t.Any] = {}
 
         with torch.no_grad():
             # 2 values to unpack, tile_ids are dropped in dataloader
@@ -228,56 +222,27 @@ class StftEvaluator:
                 # Everything down from here is just post-processing
                 inference_results.append((imgs_batch, labels_batch, outputs))
 
-            for batch_idx, (imgs_batch, labels_batch, outputs) in enumerate(
-                inference_results
-            ):
-                batch_size = imgs_batch.shape[0]
-
-                # Apply NMS
-                outputs = utils.postprocess(
-                    outputs,
-                    self.num_classes,
-                    self.confthre,
-                    self.nmsthre,
-                    class_agnostic=True,
-                )
+            stats = PredictionStats()
+            for batch_idx, batch in enumerate(inference_results):
 
                 # Match predictions to ground truth for each image
-                for i in range(batch_size):
-                    gt_boxes = self._extract_gt_boxes(labels_batch[i])
-                    pred_boxes = self._extract_pred_boxes(outputs[i])
+                batch_stats, batch_output = evaluate_batch(
+                    batch_idx,
+                    batch,
+                    EvaluationConfig(
+                        self.num_classes, self.confthre, self.nmsthre, self.iou_thre
+                    ),
+                )
+                stats += batch_stats
 
-                    tp, fp, fn = self._match_boxes(pred_boxes, gt_boxes)
-
-                    total_tp += tp
-                    total_fp += fp
-                    total_fn += fn
-                    total_gt += len(gt_boxes)
-                    total_pred += len(pred_boxes)
-
-                    if params.return_outputs:
-                        img_id = batch_idx * batch_size + i
-                        output_data[img_id] = {
-                            "pred_boxes": (
-                                pred_boxes.cpu().numpy().tolist()
-                                if pred_boxes is not None and len(pred_boxes) > 0
-                                else []
-                            ),
-                            "gt_boxes": (
-                                gt_boxes.cpu().numpy().tolist()
-                                if gt_boxes is not None and len(gt_boxes) > 0
-                                else []
-                            ),
-                            "tp": tp,
-                            "fp": fp,
-                            "fn": fn,
-                        }
+                if params.return_outputs:
+                    output_data = {**output_data, **batch_output}
 
         # Compute metrics
         precision = (
-            total_tp / (total_tp + total_fp) if (total_tp + total_fp) > 0 else 0.0
+            stats.tp / (stats.tp + stats.fp) if (stats.tp + stats.fp) > 0 else 0.0
         )
-        recall = total_tp / (total_tp + total_fn) if (total_tp + total_fn) > 0 else 0.0
+        recall = stats.tp / (stats.tp + stats.fn) if (stats.tp + stats.fn) > 0 else 0.0
         f1 = (
             2 * precision * recall / (precision + recall)
             if (precision + recall) > 0
@@ -289,9 +254,9 @@ class StftEvaluator:
         summary = (
             f"STFT Evaluation Results\n"
             f"-----------------------\n"
-            f"Total GT boxes:   {total_gt}\n"
-            f"Total predictions:{total_pred}\n"
-            f"TP: {total_tp}, FP: {total_fp}, FN: {total_fn}\n"
+            f"Total GT boxes:   {stats.gt}\n"
+            f"Total predictions:{stats.pred}\n"
+            f"TP: {stats.tp}, FP: {stats.fp}, FN: {stats.fn}\n"
             f"Precision: {precision:.4f}\n"
             f"Recall:    {recall:.4f}\n"
             f"F1 Score:  {f1:.4f}\n"
@@ -304,114 +269,183 @@ class StftEvaluator:
             return (recall, precision, summary), output_data
         return recall, precision, summary
 
-    def _extract_gt_boxes(self, labels: torch.Tensor) -> torch.Tensor:
-        """
-        Extract ground truth boxes from labels tensor.
 
-        Parameters
-        ----------
-        labels : torch.Tensor
-            Shape [max_labels, 5] with format (class_id, cx, cy, w, h).
-            Zero-padded rows have sum == 0.
+def extract_gt_boxes(labels: torch.Tensor) -> torch.Tensor:
+    """
+    Extract ground truth boxes from labels tensor.
 
-        Returns
-        -------
-        boxes : torch.Tensor
-            Shape [N, 4] in xyxy format, on same device as input.
-        """
-        # Filter out zero-padded rows
-        valid_mask = labels.sum(dim=1) > 0
-        valid_targets = labels[valid_mask]
+    Parameters
+    ----------
+    labels : torch.Tensor
+        Shape [max_labels, 5] with format (class_id, cx, cy, w, h).
+        Zero-padded rows have sum == 0.
 
-        if len(valid_targets) == 0:
-            return torch.empty((0, 4), device=labels.device)
+    Returns
+    -------
+    boxes : torch.Tensor
+        Shape [N, 4] in xyxy format, on same device as input.
+    """
+    # Filter out zero-padded rows
+    valid_mask = labels.sum(dim=1) > 0
+    valid_targets = labels[valid_mask]
 
-        # Convert cxcywh to xyxy
-        cx = valid_targets[:, 1]
-        cy = valid_targets[:, 2]
-        w = valid_targets[:, 3]
-        h = valid_targets[:, 4]
+    if len(valid_targets) == 0:
+        return torch.empty((0, 4), device=labels.device)
 
-        x1 = cx - w / 2
-        y1 = cy - h / 2
-        x2 = cx + w / 2
-        y2 = cy + h / 2
+    # Convert cxcywh to xyxy
+    cx = valid_targets[:, 1]
+    cy = valid_targets[:, 2]
+    w = valid_targets[:, 3]
+    h = valid_targets[:, 4]
 
-        return torch.stack([x1, y1, x2, y2], dim=1)
+    x1 = cx - w / 2
+    y1 = cy - h / 2
+    x2 = cx + w / 2
+    y2 = cy + h / 2
 
-    def _extract_pred_boxes(self, detections: t.Optional[torch.Tensor]) -> torch.Tensor:
-        """
-        Extract prediction boxes from postprocess output.
+    return torch.stack([x1, y1, x2, y2], dim=1)
 
-        Parameters
-        ----------
-        detections : torch.Tensor or None
-            Shape [N, 7] with format (x1, y1, x2, y2, obj_conf, class_conf, class_pred).
-            None if no detections.
 
-        Returns
-        -------
-        boxes : torch.Tensor
-            Shape [N, 4] in xyxy format.
-        """
-        if detections is None or len(detections) == 0:
-            return torch.empty((0, 4), device="cuda")
+def extract_pred_boxes(detections: t.Optional[torch.Tensor]) -> torch.Tensor:
+    """
+    Extract prediction boxes from postprocess output.
 
-        return detections[:, :4]
+    Parameters
+    ----------
+    detections : torch.Tensor or None
+        Shape [N, 7] with format (x1, y1, x2, y2, obj_conf, class_conf, class_pred).
+        None if no detections.
 
-    def _match_boxes(
-        self,
-        pred_boxes: torch.Tensor,
-        gt_boxes: torch.Tensor,
-    ) -> t.Tuple[int, int, int]:
-        """
-        Match predictions to ground truth using greedy IoU matching.
+    Returns
+    -------
+    boxes : torch.Tensor
+        Shape [N, 4] in xyxy format.
+    """
+    if detections is None or len(detections) == 0:
+        return torch.empty((0, 4), device="cuda")
 
-        Parameters
-        ----------
-        pred_boxes : torch.Tensor
-            Shape [M, 4] predicted boxes in xyxy format.
-        gt_boxes : torch.Tensor
-            Shape [N, 4] ground truth boxes in xyxy format.
+    return detections[:, :4]
 
-        Returns
-        -------
-        tp : int
-            True positives (matched predictions).
-        fp : int
-            False positives (unmatched predictions).
-        fn : int
-            False negatives (unmatched ground truth).
-        """
-        n_pred = len(pred_boxes)
-        n_gt = len(gt_boxes)
 
-        if n_pred == 0 and n_gt == 0:
-            return 0, 0, 0
-        if n_pred == 0:
-            return 0, 0, n_gt
-        if n_gt == 0:
-            return 0, n_pred, 0
+def match_boxes(
+    pred_boxes: torch.Tensor,
+    gt_boxes: torch.Tensor,
+    cfg: EvaluationConfig,
+):
+    """
+    Match predictions to ground truth using greedy IoU matching.
 
-        # Compute IoU matrix [M, N]
-        # Ensure both tensors are on the same device
-        gt_boxes = gt_boxes.to(pred_boxes.device)
-        iou_matrix = utils.bboxes_iou(pred_boxes, gt_boxes, xyxy=True)
+    Parameters
+    ----------
+    pred_boxes : torch.Tensor
+        Shape [M, 4] predicted boxes in xyxy format.
+    gt_boxes : torch.Tensor
+        Shape [N, 4] ground truth boxes in xyxy format.
 
-        # Greedy matching: for each prediction, find best GT match
-        matched_gt = set()
-        tp = 0
+    Returns
+    -------
+    tp : int
+        True positives (matched predictions).
+    fp : int
+        False positives (unmatched predictions).
+    fn : int
+        False negatives (unmatched ground truth).
+    """
+    n_pred = len(pred_boxes)
+    n_gt = len(gt_boxes)
 
-        for pred_idx in range(n_pred):
-            ious = iou_matrix[pred_idx]
-            best_gt_idx = int(ious.argmax().item())
-            best_iou = float(ious[best_gt_idx].item())
+    if n_pred == 0 and n_gt == 0:
+        return PredictionStats(0, 0, 0)
+    if n_pred == 0:
+        return PredictionStats(0, 0, n_gt)
+    if n_gt == 0:
+        return PredictionStats(0, n_pred, 0)
 
-            if best_iou >= self.iou_thre and best_gt_idx not in matched_gt:
-                tp += 1
-                matched_gt.add(best_gt_idx)
+    # Compute IoU matrix [M, N]
+    # Ensure both tensors are on the same device
+    gt_boxes = gt_boxes.to(pred_boxes.device)
+    iou_matrix = utils.bboxes_iou(pred_boxes, gt_boxes, xyxy=True)
 
-        fp = n_pred - tp
-        fn = n_gt - len(matched_gt)
+    # Greedy matching: for each prediction, find best GT match
+    matched_gt = set()
+    tp = 0
 
-        return tp, fp, fn
+    for pred_idx in range(n_pred):
+        ious = iou_matrix[pred_idx]
+        best_gt_idx = int(ious.argmax().item())
+        best_iou = float(ious[best_gt_idx].item())
+
+        if best_iou >= cfg.iouthre and best_gt_idx not in matched_gt:
+            tp += 1
+            matched_gt.add(best_gt_idx)
+
+    fp = n_pred - tp
+    fn = n_gt - len(matched_gt)
+
+    return PredictionStats(tp, fp, fn, n_gt, n_pred)
+
+
+@dataclasses.dataclass
+class EvaluationConfig:
+    num_classes: int
+    confthre: float
+    nmsthre: float
+    iouthre: float
+
+
+@dataclasses.dataclass
+class PredictionStats:
+    tp: int = 0
+    fp: int = 0
+    fn: int = 0
+    gt: int = 0
+    pred: int = 0
+
+    def __add__(self, other):
+        cls = self.__class__
+        if not isinstance(other, cls):
+            raise NotImplementedError
+        return cls(
+            self.tp + other.tp,
+            self.fp + other.fp,
+            self.fn + other.fn,
+            self.gt + other.gt,
+            self.pred + other.pred,
+        )
+
+
+def evaluate_batch(
+    batch_idx: int, batch: t.Tuple[torch.Tensor, ...], cfg: EvaluationConfig
+):
+    imgs_batch, labels_batch, outputs = batch
+    batch_size = imgs_batch.shape[0]
+
+    # Apply NMS
+    outputs = utils.postprocess(
+        outputs,
+        cfg.num_classes,
+        cfg.confthre,
+        cfg.nmsthre,
+        class_agnostic=True,
+    )
+
+    stats = PredictionStats()
+    output_data: t.Dict[int, t.Any] = {}
+    for i in range(batch_size):
+        gt_boxes = extract_gt_boxes(labels_batch[i])
+        pred_boxes = extract_pred_boxes(outputs[i])
+        sample_stats = match_boxes(pred_boxes, gt_boxes, cfg)
+        stats += sample_stats
+
+        img_id = batch_idx * batch_size + i
+        output_data[img_id] = {
+            "pred_boxes": (
+                pred_boxes.cpu().numpy().tolist() if len(pred_boxes) > 0 else []
+            ),
+            "gt_boxes": (gt_boxes.cpu().numpy().tolist() if len(gt_boxes) > 0 else []),
+            "tp": sample_stats.tp,
+            "fp": sample_stats.fp,
+            "fn": sample_stats.fn,
+        }
+
+    return stats, output_data
