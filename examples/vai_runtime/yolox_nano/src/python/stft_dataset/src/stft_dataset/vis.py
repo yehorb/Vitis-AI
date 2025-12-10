@@ -66,18 +66,15 @@ def visualize_detections(
     # Prepare display data based on mode
     if display_mode == "normalized":
         # Normalize to [0, 1]
-        display_data = (spectrogram - vmin_db) / (vmax_db - vmin_db)
-        display_data = np.clip(display_data, 0.0, 1.0)
         vmin_display, vmax_display = 0.0, 1.0
         colorbar_label = "Normalized magnitude"
     else:  # raw
-        display_data = spectrogram
         vmin_display, vmax_display = vmin_db, vmax_db
         colorbar_label = "Magnitude (dB)"
 
     # Display spectrogram
     im = ax.imshow(
-        display_data,
+        spectrogram,
         origin="lower",
         aspect="auto",
         cmap=cmap,

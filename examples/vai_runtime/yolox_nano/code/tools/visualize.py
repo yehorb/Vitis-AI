@@ -385,9 +385,16 @@ def main() -> None:
             suffix = f"_{args.display}"
             save_path = str(save_dir / f"{tile_id}{suffix}.png")
 
+        if args.display == "raw":
+            spectrogram = raw_img[0]
+        elif args.display == "normalized":
+            spectrogram = norm_img[0]
+        else:
+            raise ValueError(f"Invalid display mode: {args.display}")
+
         # Visualize
         visualize_detections(
-            spectrogram=raw_img[0],
+            spectrogram=spectrogram,
             gt_boxes=gt_boxes if len(gt_boxes) > 0 else None,
             predictions=predictions,
             display_mode=args.display,  # type: ignore[arg-type]
