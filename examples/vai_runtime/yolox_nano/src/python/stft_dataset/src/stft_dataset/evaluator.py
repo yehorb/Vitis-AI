@@ -199,6 +199,7 @@ class StftEvaluator:
         inference_time = 0.0
         n_samples = 0
 
+        inference_results: t.List[t.Tuple[torch.Tensor, ...]] = []
         output_data: t.Dict[str, t.Any] = {}
 
         with torch.no_grad():
@@ -225,7 +226,12 @@ class StftEvaluator:
                 outputs = params.postprocess(is_parallel, outputs)
 
                 # Everything down from here is just post-processing
-                inference_result = (imgs_batch, labels_batch, outputs)
+                inference_results.append((imgs_batch, labels_batch, outputs))
+
+            for batch_idx, (imgs_batch, labels_batch, outputs) in enumerate(
+                inference_results
+            ):
+                batch_size = imgs_batch.shape[0]
 
                 # Apply NMS
                 outputs = utils.postprocess(
