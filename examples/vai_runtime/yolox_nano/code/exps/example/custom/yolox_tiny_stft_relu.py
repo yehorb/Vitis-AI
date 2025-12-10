@@ -53,23 +53,19 @@ class Exp(MyExp):
         self.val_split = self.data_dir / "splits" / "val.txt"
 
         # ---------------- augmentation config ---------------- #
-        # Disable augmentations not applicable to spectrograms
+        # Disable augmentations - use specialized augs later
         self.mosaic_prob = 0.0
         self.mixup_prob = 0.0
         self.hsv_prob = 0.0
-        self.flip_prob = 0.5  # Vertical and horizontal flip probability
+        self.flip_prob = 0.0
         self.enable_mixup = False
-
-        # Gaussian noise augmentation for low-SNR robustness
-        self.noise_aug_prob = 0.3  # Probability of adding noise
-        self.noise_std_range = (0.01, 0.05)  # Range of noise std (normalized space)
 
         # ---------------- training config ---------------- #
         self.max_epoch = 100  # Extended training
         self.warmup_epochs = 5  # Slightly longer warmup for fresh training
         self.no_aug_epochs = 10  # Last 10 epochs: L1 loss + no augmentation
         self.eval_interval = 5  # Evaluate every 5 epochs
-        self.print_interval = 20
+        self.print_interval = 10
         self.save_history_ckpt = True  # Save checkpoints for analysis
 
         # Learning rate - standard for training from scratch
@@ -150,21 +146,26 @@ class Exp(MyExp):
             vmax_db,
         )
 
+        # Time reversal (has physical sense)
+        self.hflip_prob = 0.5
+        # Frequency reversal? (has less physical sense) - but good for training
+        self.vflip_prob = 0.5
+        # Gaussian noise augmentation for low-SNR robustness
+        self.noise_aug_prob = 0.3
+        self.noise_std_range = (0.01, 0.05)  # Range of noise std (normalized space)
+
         # Apply flip augmentation (time-reversal) unless disabled
-        if not no_aug and self.flip_prob > 0:
-            dataset = aug.RandomVerticalFlip(
-                dataset,
-                flip_prob=self.flip_prob,
-                img_height=self.input_size[0],
-            )
+        if not no_aug:
             dataset = aug.RandomHorizontalFlip(
                 dataset,
-                flip_prob=self.flip_prob,
+                flip_prob=self.hflip_prob,
                 img_width=self.input_size[1],
             )
-
-        # Apply Gaussian noise augmentation for low-SNR robustness
-        if not no_aug and self.noise_aug_prob > 0:
+            dataset = aug.RandomVerticalFlip(
+                dataset,
+                flip_prob=self.vflip_prob,
+                img_height=self.input_size[0],
+            )
             dataset = aug.GaussianNoiseAugmentation(
                 dataset,
                 noise_prob=self.noise_aug_prob,
