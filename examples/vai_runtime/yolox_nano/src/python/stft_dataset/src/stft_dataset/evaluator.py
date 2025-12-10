@@ -421,6 +421,27 @@ class PredictionStats:
         return 2 * p * r / (p + r) if (p + r) > 0 else 0.0
 
 
+@dataclasses.dataclass
+class EvaluationSnapshot:
+    """Result from a single threshold combination."""
+
+    conf: float
+    nms: float
+    stats: PredictionStats
+
+    @property
+    def precision(self) -> float:
+        return self.stats.precision
+
+    @property
+    def recall(self) -> float:
+        return self.stats.recall
+
+    @property
+    def f1(self) -> float:
+        return self.stats.f1
+
+
 def evaluate_batch(
     batch_idx: int, batch: t.Tuple[torch.Tensor, ...], cfg: EvaluationConfig
 ):
