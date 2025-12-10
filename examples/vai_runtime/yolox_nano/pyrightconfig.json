@@ -4,5 +4,6 @@
     "./src/edge/"
   ],
   "reportMissingTypeStubs": false,
+  "reportUnannotatedClassAttribute": false,
   "reportUnusedCallResult": false
 }
