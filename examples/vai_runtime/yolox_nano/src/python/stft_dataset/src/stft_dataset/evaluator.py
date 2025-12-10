@@ -239,15 +239,9 @@ class StftEvaluator:
                     output_data = {**output_data, **batch_output}
 
         # Compute metrics
-        precision = (
-            stats.tp / (stats.tp + stats.fp) if (stats.tp + stats.fp) > 0 else 0.0
-        )
-        recall = stats.tp / (stats.tp + stats.fn) if (stats.tp + stats.fn) > 0 else 0.0
-        f1 = (
-            2 * precision * recall / (precision + recall)
-            if (precision + recall) > 0
-            else 0.0
-        )
+        precision = stats.precision
+        recall = stats.recall
+        f1 = stats.f1
 
         avg_time_ms = 1000 * inference_time / n_samples if n_samples > 0 else 0.0
 
@@ -412,6 +406,19 @@ class PredictionStats:
             self.gt + other.gt,
             self.pred + other.pred,
         )
+
+    @property
+    def precision(self) -> float:
+        return self.tp / (self.tp + self.fp) if (self.tp + self.fp) > 0 else 0.0
+
+    @property
+    def recall(self) -> float:
+        return self.tp / (self.tp + self.fn) if (self.tp + self.fn) > 0 else 0.0
+
+    @property
+    def f1(self) -> float:
+        p, r = self.precision, self.recall
+        return 2 * p * r / (p + r) if (p + r) > 0 else 0.0
 
 
 def evaluate_batch(
