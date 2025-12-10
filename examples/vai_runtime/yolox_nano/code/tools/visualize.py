@@ -323,7 +323,9 @@ def main() -> None:
             indices = [args.index]
         else:
             # Multiple samples
-            indices = list(range(min(args.num_samples, len(dataset))))
+            all_indices = list(range(len(dataset)))
+            num_indices = min(args.num_samples, len(dataset))
+            indices = np.random.choice(all_indices, num_indices)
 
         print(f"Dataset: {len(dataset)} samples from {args.split} split")
     normalized = Normalize(dataset, vmin_db, vmax_db)
