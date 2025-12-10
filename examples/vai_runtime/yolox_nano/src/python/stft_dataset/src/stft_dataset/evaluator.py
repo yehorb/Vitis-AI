@@ -35,7 +35,7 @@ class EvaluatorParams:
     def to_device(self, imgs: torch.Tensor, dtype: torch.dtype):
         return imgs.to(dtype=dtype, device="cuda")
 
-    def should_exit_early(self):
+    def should_dump_xmodel(self):
         return False
 
     def exit_early(self, params: t.Dict[str, t.Any]):
@@ -65,7 +65,7 @@ class QEvaluatorParams:
     def to_device(self, imgs: torch.Tensor, dtype: torch.dtype):
         return imgs.to(dtype=dtype, device=self.device)
 
-    def should_exit_early(self):
+    def should_dump_xmodel(self):
         return self.is_dump
 
     def exit_early(self, params: t.Dict[str, t.Any]):
@@ -209,14 +209,23 @@ class StftEvaluator:
                 n_samples += batch_size
 
                 # Inference
+                # Network predicts center-based format (cx, cy, w, h)
+                # We convert to corner format (x1, y1, x2, y2) for NMS
+                # `outputs` contents: [x1, y1, x2, y2, confidence]
+
                 start = time.time()
+                # Default float model returns final bboxes [x1, y1, x2, y2, confidence] here
                 outputs = model(imgs_batch)
                 inference_time += time.time() - start
 
-                if params.should_exit_early():
+                if params.should_dump_xmodel():
                     return params.exit_early(output_data)
 
+                # Quantization-aware model decodes individual head outputs into bboxes here
                 outputs = params.postprocess(is_parallel, outputs)
+
+                # Everything down from here is just post-processing
+                inference_result = (imgs_batch, labels_batch, outputs)
 
                 # Apply NMS
                 outputs = utils.postprocess(
