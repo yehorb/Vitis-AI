@@ -83,3 +83,71 @@ class RandomHorizontalFlip(Dataset[T], t.Generic[T]):
             labels_flipped = labels
 
         return img_flipped, labels_flipped
+
+
+class RandomVerticalFlip(Dataset[T], t.Generic[T]):
+    """
+    Dataset decorator that applies random vertical flip augmentation.
+
+    Flips both the spectrogram and bounding box y-coordinates. This is
+    equivalent to frequency mirroring. Use with caution - may not be
+    physically meaningful for all signal types.
+
+    Parameters
+    ----------
+    dataset : Dataset[T]
+        Underlying dataset yielding (img, labels, ...) tuples.
+        - img: [C, H, W] array
+        - labels: [N, 5] array with columns [class_id, cx, cy, w, h]
+    flip_prob : float
+        Probability of applying vertical flip (default: 0.5).
+    img_height : int
+        Height of the image, used to compute flipped y-coordinates.
+
+    Example
+    -------
+    >>> base = Normalize(StftDataset(...), vmin, vmax)
+    >>> augmented = RandomVerticalFlip(base, flip_prob=0.5, img_height=128)
+    >>> img, labels, tile_id = augmented[0]
+    """
+
+    def __init__(
+        self,
+        dataset: Dataset[T],
+        flip_prob: float = 0.5,
+        img_height: int = 128,
+    ):
+        self.dataset: Dataset[T] = dataset
+        self.flip_prob: float = flip_prob
+        self.img_height: int = img_height
+
+    def __len__(self) -> int:
+        return len(self.dataset)  # type: ignore[arg-type]
+
+    def __getitem__(self, index: int) -> T:
+        item = self.dataset[index]
+        img = item[0]
+        labels = item[1]
+
+        if np.random.random() < self.flip_prob:
+            img, labels = self._flip(img, labels)
+
+        return (img, labels, *item[2:])  # type: ignore[return-value]
+
+    def _flip(
+        self,
+        img: npt.NDArray[np.float32],
+        labels: npt.NDArray[np.float32],
+    ) -> t.Tuple[npt.NDArray[np.float32], npt.NDArray[np.float32]]:
+        """Apply vertical flip to image and labels."""
+        # Flip image along height axis: [C, H, W] -> flip H
+        img_flipped = np.ascontiguousarray(img[:, ::-1, :])
+
+        # Flip box y-coordinates: cy_new = (img_height - 1) - cy
+        if len(labels) > 0:
+            labels_flipped = labels.copy()
+            labels_flipped[:, 2] = (self.img_height - 1) - labels[:, 2]
+        else:
+            labels_flipped = labels
+
+        return img_flipped, labels_flipped
