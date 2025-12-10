@@ -44,13 +44,13 @@ Usage Examples:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import typing as t
 from pathlib import Path
 
 import numpy as np
 import torch
-
 from stft_dataset import LoadSplit, Matlab, StftDataset
 from stft_dataset.normalization import load_normalization_params
 from stft_dataset.vis import labels_to_xyxy, visualize_detections
@@ -59,7 +59,6 @@ from yolox.utils import fuse_model, postprocess
 
 if t.TYPE_CHECKING:
     import numpy.typing as npt
-
     from torch import nn
 
     # (box_xyxy, score)
@@ -89,6 +88,12 @@ def make_parser() -> argparse.ArgumentParser:
         type=str,
         default=None,
         help="Checkpoint file path. If not provided, only GT boxes are shown.",
+    )
+    parser.add_argument(
+        "-q",
+        "--quant",
+        action="store_true",
+        help="Load quantized model (sets W_QUANT=1)",
     )
 
     # Data source options
@@ -172,6 +177,7 @@ def load_model(
     ckpt_path: str,
     device: str,
     fuse: bool = False,
+    quant: bool = False,
 ) -> nn.Module:
     """
     Load trained model from checkpoint.
@@ -192,6 +198,8 @@ def load_model(
     model : nn.Module
         Loaded model in eval mode.
     """
+    if quant:
+        os.environ["W_QUANT"] = "1"
     model = exp.get_model()
 
     if device == "cuda" and torch.cuda.is_available():
@@ -325,7 +333,7 @@ def main() -> None:
     model: t.Optional[nn.Module] = None
     if args.ckpt:
         print(f"Loading model from: {args.ckpt}")
-        model = load_model(exp, args.ckpt, args.device, args.fuse)
+        model = load_model(exp, args.ckpt, args.device, args.fuse, args.quant)
         print("Model loaded successfully")
     else:
         print("No checkpoint provided - showing ground truth only")
