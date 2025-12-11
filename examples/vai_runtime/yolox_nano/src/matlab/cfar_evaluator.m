@@ -63,6 +63,9 @@ function [recall, precision, summary] = cfar_evaluator(dataset_root, varargin)
     fprintf('CFAR evaluator: preloading %d tiles into memory...\n', n_images);
     preload_log_every = max(1, floor(n_images / 20));
 
+    % Open HDF5 file once for faster per-tile reads
+    h5_file_id = H5F.open(h5_path, 'H5F_ACC_RDONLY', 'H5P_DEFAULT');
+
     for k = 1:n_images
         if mod(k, preload_log_every) == 0 || k == 1 || k == n_images
             fprintf('  Preload: tile %d / %d (%.1f%%%%)\n', ...
@@ -72,14 +75,14 @@ function [recall, precision, summary] = cfar_evaluator(dataset_root, varargin)
         tile_id = strtrim(test_ids(k));
         tile_id = char(tile_id);
 
-        % Load STFT tile (in dB) and store
-        s_db = h5read(h5_path, ['/S_db/' tile_id]);
+        % Load STFT tile (in dB) and store using low-level HDF5
+        s_db = h5_read_dataset(h5_file_id, '/S_db', tile_id);
         tiles_map(tile_id) = s_db;  % keep as single; convert to double later
 
         % Load GT boxes for this tile. Not all tiles have /boxes/<id>,
-        % so use try/catch to avoid a global h5info(/boxes) scan.
+        % so use try/catch to avoid a global group scan.
         try
-            gt_boxes = h5read(h5_path, ['/boxes/' tile_id]);
+            gt_boxes = h5_read_dataset(h5_file_id, '/boxes', tile_id);
             gt_boxes = double(gt_boxes);
             if size(gt_boxes, 2) ~= 4 && size(gt_boxes, 1) == 4
                 gt_boxes = gt_boxes.';
@@ -91,7 +94,10 @@ function [recall, precision, summary] = cfar_evaluator(dataset_root, varargin)
         boxes_map(tile_id) = gt_boxes;
     end
 
+    H5F.close(h5_file_id);
+
     fprintf('CFAR evaluator: preload done. Running CFAR on all tiles...\n');
+
 
     % ------------------------------------------------------------------
     % Create CFAR detector and process all tiles from memory
@@ -224,6 +230,20 @@ function [recall, precision, summary] = cfar_evaluator(dataset_root, varargin)
         ], total_gt, total_pred, total_tp, total_fp, total_fn, precision, recall, f1, avg_time_ms);
 
     fprintf('%s\n', summary);
+end
+
+
+function data = h5_read_dataset(file_id, group_path, dset_name)
+    % Read a dataset from an open HDF5 file using low-level API.
+    % Mirrors the h5_write_dataset helper used in generate_training_signal.m
+
+    group_id = H5G.open(file_id, group_path);
+    dset_id  = H5D.open(group_id, dset_name);
+
+    data = H5D.read(dset_id, 'H5ML_DEFAULT', 'H5S_ALL', 'H5S_ALL', 'H5P_DEFAULT');
+
+    H5D.close(dset_id);
+    H5G.close(group_id);
 end
 
 
