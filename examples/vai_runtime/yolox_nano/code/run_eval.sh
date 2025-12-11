@@ -17,9 +17,9 @@ export CUDA_VISIBLE_DEVICES=0
 GPU_NUM=1
 
 export LD_LIBRARY_PATH=${PWD}/code:${LD_LIBRARY_PATH}
-BATCH=2048
-CFG=code/exps/example/custom/yolox_nano_stft_relu.py
-CKPT=./YOLOX_outputs/yolox_nano_stft_relu/best_ckpt.pth
+BATCH=1024
+CFG=code/exps/example/custom/yolox_tiny_stft_relu.py
+CKPT=./YOLOX_outputs/yolox_tiny_stft_relu/best_ckpt.pth
 
 set -ex
 python -m yolox.tools.eval -f ${CFG} -c ${CKPT} -b ${BATCH} -d ${GPU_NUM} "$@"
