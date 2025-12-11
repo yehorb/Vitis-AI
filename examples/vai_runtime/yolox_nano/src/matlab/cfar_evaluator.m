@@ -19,6 +19,7 @@ function [recall, precision, summary] = cfar_evaluator(dataset_root, varargin)
     addParameter(p, 'TrainingBandSize', [16 16], @(x) isnumeric(x) && numel(x) == 2);
     addParameter(p, 'IoUThreshold', 0.5, @(x) isnumeric(x) && isscalar(x) && x > 0);
     addParameter(p, 'MinArea', 3, @(x) isnumeric(x) && isscalar(x) && x >= 1);
+    addParameter(p, 'TileIds', []);
     parse(p, varargin{:});
     cfg = p.Results;
 
@@ -39,7 +40,11 @@ function [recall, precision, summary] = cfar_evaluator(dataset_root, varargin)
         error('Test split file not found: %s', test_list_path);
     end
 
-    test_ids = read_id_list(test_list_path);
+    if size(cfg.TileIds) > 0
+        test_ids = cfg.TileIds;
+    else
+        test_ids = read_id_list(test_list_path);
+    end
     n_images = numel(test_ids);
     if n_images == 0
         error('Test split is empty.');
