@@ -454,11 +454,13 @@ def match_boxes(
     n_gt = len(gt_boxes)
 
     if n_pred == 0 and n_gt == 0:
-        return PredictionStats(0, 0, 0)
+        return PredictionStats(0, 0, 0, 0, 0)
     if n_pred == 0:
-        return PredictionStats(0, 0, n_gt)
+        # All ground truth boxes are missed (false negatives), no predictions made
+        return PredictionStats(0, 0, n_gt, n_gt, 0)
     if n_gt == 0:
-        return PredictionStats(0, n_pred, 0)
+        # All predictions are false positives, no ground truth boxes
+        return PredictionStats(0, n_pred, 0, 0, n_pred)
 
     # Compute IoU matrix [M, N]
     # Ensure both tensors are on the same device
