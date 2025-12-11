@@ -30,7 +30,7 @@ function [recall, precision, summary] = cfar_evaluator(dataset_root, varargin)
 
     h5_path = fullfile(dataset_root, 'tensors', 'tiles.h5');
     splits_dir = fullfile(dataset_root, 'splits');
-    test_list_path = fullfile(splits_dir, 'test.txt');
+    test_list_path = fullfile(splits_dir, 'val.txt');
 
     if ~isfile(h5_path)
         error('HDF5 file not found: %s', h5_path);
@@ -48,11 +48,9 @@ function [recall, precision, summary] = cfar_evaluator(dataset_root, varargin)
     % Simple progress logging (for processing phase)
     log_every = max(1, floor(n_images / 20));  % ~5%% steps
 
-    boxes_info = h5info(h5_path, '/boxes');
-    box_names = string({boxes_info.Datasets.Name});
-
     % ------------------------------------------------------------------
     % Preload all tiles and GT boxes into memory to avoid HDF5 overhead
+    % (avoid full h5info() on /boxes to reduce startup cost)
     % ------------------------------------------------------------------
     tiles_map = containers.Map('KeyType','char','ValueType','any');
     boxes_map = containers.Map('KeyType','char','ValueType','any');
@@ -73,14 +71,16 @@ function [recall, precision, summary] = cfar_evaluator(dataset_root, varargin)
         s_db = h5read(h5_path, ['/S_db/' tile_id]);
         tiles_map(tile_id) = s_db;  % keep as single; convert to double later
 
-        % Load GT boxes if present, else empty
-        if any(box_names == string(tile_id))
+        % Load GT boxes for this tile. Not all tiles have /boxes/<id>,
+        % so use try/catch to avoid a global h5info(/boxes) scan.
+        try
             gt_boxes = h5read(h5_path, ['/boxes/' tile_id]);
             gt_boxes = double(gt_boxes);
             if size(gt_boxes, 2) ~= 4 && size(gt_boxes, 1) == 4
                 gt_boxes = gt_boxes.';
             end
-        else
+        catch
+            % Missing dataset => no boxes
             gt_boxes = zeros(0, 4);
         end
         boxes_map(tile_id) = gt_boxes;
