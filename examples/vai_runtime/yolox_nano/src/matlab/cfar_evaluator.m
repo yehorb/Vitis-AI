@@ -40,7 +40,7 @@ function [recall, precision, summary] = cfar_evaluator(dataset_root, varargin)
         error('Test split file not found: %s', test_list_path);
     end
 
-    if size(cfg.TileIds) > 0
+    if ~isempty(cfg.TileIds)
         test_ids = cfg.TileIds;
     else
         test_ids = read_id_list(test_list_path);
@@ -127,9 +127,35 @@ function [recall, precision, summary] = cfar_evaluator(dataset_root, varargin)
         s_db = double(s_db);
         s_power = 10.^(s_db / 10.0);
 
-        t_start = tic;
-        det_mask = cfar2d(s_power);
-        det_mask = logical(det_mask);
+        % CFAR operates only on valid CUT cells; build cutidx to
+        % skip borders where training/guard windows do not fit.
+        [H, W] = size(s_power);
+        gr = cfg.GuardBandSize(1); gc = cfg.GuardBandSize(2);
+        tr = cfg.TrainingBandSize(1); tc = cfg.TrainingBandSize(2);
+
+        row_min = 1 + tr + gr;
+        row_max = H - tr - gr;
+        col_min = 1 + tc + gc;
+        col_max = W - tc - gc;
+
+        if row_min > row_max || col_min > col_max
+            % Window too big for this tile; skip detections
+            det_mask = false(H, W);
+            tile_time = 0;
+        else
+            [ccol, rrow] = meshgrid(col_min:col_max, row_min:row_max);
+            cutidx = [rrow(:).'; ccol(:).'];
+
+            t_start = tic;
+            y = cfar2d(s_power, cutidx);  % y is 1xD or Dx1
+            tile_time = toc(t_start);
+
+            % Build full-size detection mask
+            det_mask = false(H, W);
+            det_mask(sub2ind([H, W], cutidx(1, :), cutidx(2, :))) = logical(y(:)).';
+        end
+
+        inference_time = inference_time + tile_time;
 
         if cfg.MinArea > 1
             det_mask = bwareaopen(det_mask, round(cfg.MinArea));
@@ -157,9 +183,6 @@ function [recall, precision, summary] = cfar_evaluator(dataset_root, varargin)
             h  = max(1, min(H - y0, h));
             pred_boxes = [x0, y0, w, h];
         end
-
-        tile_time = toc(t_start);
-        inference_time = inference_time + tile_time;
 
         gt_boxes = boxes_map(tile_id);
 
