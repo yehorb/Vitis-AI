@@ -20,4 +20,4 @@ BATCH=1024
 CFG=code/exps/example/custom/yolox_tiny_stft_relu.py
 
 set -ex
-python -m yolox.tools.train -f ${CFG} -d ${GPU_NUM} -b ${BATCH} --fp16
+python -m yolox.tools.train -f ${CFG} -d ${GPU_NUM} -b ${BATCH} "$@"
