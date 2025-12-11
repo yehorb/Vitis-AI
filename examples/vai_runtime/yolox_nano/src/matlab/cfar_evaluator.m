@@ -45,6 +45,10 @@ function [recall, precision, summary] = cfar_evaluator(dataset_root, varargin)
         error('Test split is empty.');
     end
 
+    % Simple progress logging
+    log_every = max(1, floor(n_images / 20));  % ~5%% steps
+    fprintf('CFAR evaluator: %d tiles in test split. Processing...\n', n_images);
+
     boxes_info = h5info(h5_path, '/boxes');
     box_names = string({boxes_info.Datasets.Name});
 
@@ -65,6 +69,11 @@ function [recall, precision, summary] = cfar_evaluator(dataset_root, varargin)
     inference_time = 0.0;
 
     for k = 1:n_images
+        if mod(k, log_every) == 0 || k == 1 || k == n_images
+            fprintf('  CFAR evaluator: tile %d / %d (%.1f%%%%)\n', ...
+                k, n_images, 100 * k / n_images);
+        end
+
         tile_id = strtrim(test_ids(k));
         tile_id = char(tile_id);
 
