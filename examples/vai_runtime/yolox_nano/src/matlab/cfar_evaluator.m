@@ -45,13 +45,52 @@ function [recall, precision, summary] = cfar_evaluator(dataset_root, varargin)
         error('Test split is empty.');
     end
 
-    % Simple progress logging
+    % Simple progress logging (for processing phase)
     log_every = max(1, floor(n_images / 20));  % ~5%% steps
-    fprintf('CFAR evaluator: %d tiles in test split. Processing...\n', n_images);
 
     boxes_info = h5info(h5_path, '/boxes');
     box_names = string({boxes_info.Datasets.Name});
 
+    % ------------------------------------------------------------------
+    % Preload all tiles and GT boxes into memory to avoid HDF5 overhead
+    % ------------------------------------------------------------------
+    tiles_map = containers.Map('KeyType','char','ValueType','any');
+    boxes_map = containers.Map('KeyType','char','ValueType','any');
+
+    fprintf('CFAR evaluator: preloading %d tiles into memory...\n', n_images);
+    preload_log_every = max(1, floor(n_images / 20));
+
+    for k = 1:n_images
+        if mod(k, preload_log_every) == 0 || k == 1 || k == n_images
+            fprintf('  Preload: tile %d / %d (%.1f%%%%)\n', ...
+                k, n_images, 100 * k / n_images);
+        end
+
+        tile_id = strtrim(test_ids(k));
+        tile_id = char(tile_id);
+
+        % Load STFT tile (in dB) and store
+        s_db = h5read(h5_path, ['/S_db/' tile_id]);
+        tiles_map(tile_id) = s_db;  % keep as single; convert to double later
+
+        % Load GT boxes if present, else empty
+        if any(box_names == string(tile_id))
+            gt_boxes = h5read(h5_path, ['/boxes/' tile_id]);
+            gt_boxes = double(gt_boxes);
+            if size(gt_boxes, 2) ~= 4 && size(gt_boxes, 1) == 4
+                gt_boxes = gt_boxes.';
+            end
+        else
+            gt_boxes = zeros(0, 4);
+        end
+        boxes_map(tile_id) = gt_boxes;
+    end
+
+    fprintf('CFAR evaluator: preload done. Running CFAR on all tiles...\n');
+
+    % ------------------------------------------------------------------
+    % Create CFAR detector and process all tiles from memory
+    % ------------------------------------------------------------------
     cfar2d = phased.CFARDetector2D( ...
         'Method', 'CA', ...
         'GuardBandSize',    cfg.GuardBandSize, ...
@@ -68,6 +107,8 @@ function [recall, precision, summary] = cfar_evaluator(dataset_root, varargin)
 
     inference_time = 0.0;
 
+    fprintf('CFAR evaluator: processing %d tiles...\n', n_images);
+
     for k = 1:n_images
         if mod(k, log_every) == 0 || k == 1 || k == n_images
             fprintf('  CFAR evaluator: tile %d / %d (%.1f%%%%)\n', ...
@@ -77,7 +118,7 @@ function [recall, precision, summary] = cfar_evaluator(dataset_root, varargin)
         tile_id = strtrim(test_ids(k));
         tile_id = char(tile_id);
 
-        s_db = h5read(h5_path, ['/S_db/' tile_id]);
+        s_db = tiles_map(tile_id);
         s_db = double(s_db);
         s_power = 10.^(s_db / 10.0);
 
@@ -115,15 +156,7 @@ function [recall, precision, summary] = cfar_evaluator(dataset_root, varargin)
         tile_time = toc(t_start);
         inference_time = inference_time + tile_time;
 
-        if any(box_names == string(tile_id))
-            gt_boxes = h5read(h5_path, ['/boxes/' tile_id]);
-            gt_boxes = double(gt_boxes);
-            if size(gt_boxes, 2) ~= 4 && size(gt_boxes, 1) == 4
-                gt_boxes = gt_boxes.';
-            end
-        else
-            gt_boxes = zeros(0, 4);
-        end
+        gt_boxes = boxes_map(tile_id);
 
         [tp, fp, fn, ngt, npred] = eval_tile_boxes(gt_boxes, pred_boxes, cfg.IoUThreshold);
 
