@@ -303,7 +303,7 @@ for k = 1:n_tiles
 
     if cfg.write_json_annotations
         ann.image = struct('id',tile_id,'file_name',fullfile('images_tiles',[tile_id '.png']),...
-                           'width',W,'height',H);
+            'width',W,'height',H);
         ann.annotations = [];
     end
     boxes_for_h5 = [];
@@ -394,7 +394,7 @@ meta = struct( ...
     'render', struct('encoding',render.encoding,'scale',render.scale,'vmin_db',vmin,'vmax_db',vmax), ...
     'frames_per_image', stft.frames_per_image, ...
     'run_id', run_id ...
-);
+    );
 fid = fopen(ds.meta_path,'w'); fwrite(fid, jsonencode(meta,'PrettyPrint',true)); fclose(fid);
 
 label_map = struct('classes', {struct('id',1,'name','QPSK')});
@@ -416,24 +416,24 @@ write_list(fullfile(ds.splits_dir, 'test.txt'),  test_ids);
 save_figures = false;
 
 if save_figures
-SdB_disp = min(max(double(SdB), vmin), vmax);
-set(0,'DefaultFigureVisible','on');
+    SdB_disp = min(max(double(SdB), vmin), vmax);
+    set(0,'DefaultFigureVisible','on');
 
-f1 = figure('Name','STFT Full');
-imagesc(T, F, SdB_disp); axis xy; colormap parula; colorbar;
-xlabel('Time (s)'); ylabel('Frequency (Hz)'); title('STFT Full');
-savefig(f1, fullfile(ds.fig_dir,'stft_full.fig'));
-saveas(f1, fullfile(ds.fig_dir,'stft_full.png'));
+    f1 = figure('Name','STFT Full');
+    imagesc(T, F, SdB_disp); axis xy; colormap parula; colorbar;
+    xlabel('Time (s)'); ylabel('Frequency (Hz)'); title('STFT Full');
+    savefig(f1, fullfile(ds.fig_dir,'stft_full.fig'));
+    saveas(f1, fullfile(ds.fig_dir,'stft_full.png'));
 
-f2 = figure('Name','STFT Full + GT Boxes');
-imagesc(T, F, SdB_disp); axis xy; colormap parula; colorbar; hold on;
-for k = 1:numel(gt)
-    rectangle('Position',[gt(k).t0, gt(k).fmin, max(gt(k).t1-gt(k).t0,eps), max(gt(k).fmax-gt(k).fmin,eps)], ...
-              'EdgeColor',[1 0 0],'LineWidth',3);
-end
-hold off; xlabel('Time (s)'); ylabel('Frequency (Hz)'); title('STFT Full + GT Boxes');
-savefig(f2, fullfile(ds.fig_dir,'stft_full_boxes.fig'));
-saveas(f2, fullfile(ds.fig_dir,'stft_full_boxes.png'));
+    f2 = figure('Name','STFT Full + GT Boxes');
+    imagesc(T, F, SdB_disp); axis xy; colormap parula; colorbar; hold on;
+    for k = 1:numel(gt)
+        rectangle('Position',[gt(k).t0, gt(k).fmin, max(gt(k).t1-gt(k).t0,eps), max(gt(k).fmax-gt(k).fmin,eps)], ...
+            'EdgeColor',[1 0 0],'LineWidth',3);
+    end
+    hold off; xlabel('Time (s)'); ylabel('Frequency (Hz)'); title('STFT Full + GT Boxes');
+    savefig(f2, fullfile(ds.fig_dir,'stft_full_boxes.fig'));
+    saveas(f2, fullfile(ds.fig_dir,'stft_full_boxes.png'));
 end
 
 fprintf('Done. Tiles=%d | train=%d val=%d test=%d | overlap=%d (%s) | run_id=%s\n', ...

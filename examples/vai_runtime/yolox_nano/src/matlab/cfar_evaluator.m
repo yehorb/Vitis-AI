@@ -41,363 +41,363 @@ function [recall, precision, summary] = cfar_evaluator(dataset_root, varargin)
 %                          or cellstr) to evaluate instead of the
 %                          default split file.
 
-    p = inputParser;
-    addParameter(p, 'Pfa', 1e-4, @(x) isnumeric(x) && isscalar(x) && x > 0);
-    addParameter(p, 'GuardBandSize', [4 4], @(x) isnumeric(x) && numel(x) == 2);
-    addParameter(p, 'TrainingBandSize', [16 16], @(x) isnumeric(x) && numel(x) == 2);
-    addParameter(p, 'IoUThreshold', 0.5, @(x) isnumeric(x) && isscalar(x) && x > 0);
-    addParameter(p, 'MinArea', 3, @(x) isnumeric(x) && isscalar(x) && x >= 1);
-    addParameter(p, 'TileIds', []);
-    parse(p, varargin{:});
-    cfg = p.Results;
+p = inputParser;
+addParameter(p, 'Pfa', 1e-4, @(x) isnumeric(x) && isscalar(x) && x > 0);
+addParameter(p, 'GuardBandSize', [4 4], @(x) isnumeric(x) && numel(x) == 2);
+addParameter(p, 'TrainingBandSize', [16 16], @(x) isnumeric(x) && numel(x) == 2);
+addParameter(p, 'IoUThreshold', 0.5, @(x) isnumeric(x) && isscalar(x) && x > 0);
+addParameter(p, 'MinArea', 3, @(x) isnumeric(x) && isscalar(x) && x >= 1);
+addParameter(p, 'TileIds', []);
+parse(p, varargin{:});
+cfg = p.Results;
 
-    if isstring(dataset_root) || ischar(dataset_root)
-        dataset_root = char(dataset_root);
+if isstring(dataset_root) || ischar(dataset_root)
+    dataset_root = char(dataset_root);
+else
+    error('dataset_root must be a string or char path.');
+end
+
+h5_path = fullfile(dataset_root, 'tensors', 'tiles.h5');
+splits_dir = fullfile(dataset_root, 'splits');
+test_list_path = fullfile(splits_dir, 'val.txt');
+
+if ~isfile(h5_path)
+    error('HDF5 file not found: %s', h5_path);
+end
+if ~isfile(test_list_path)
+    error('Test split file not found: %s', test_list_path);
+end
+
+if ~isempty(cfg.TileIds)
+    test_ids = cfg.TileIds;
+else
+    test_ids = read_id_list(test_list_path);
+end
+n_images = numel(test_ids);
+if n_images == 0
+    error('Test split is empty.');
+end
+
+% Simple progress logging (for processing phase)
+log_every = max(1, floor(n_images / 20));  % ~5%% steps
+
+% ------------------------------------------------------------------
+% Preload all tiles and GT boxes into memory to avoid HDF5 overhead.
+%
+% tiles_map: maps tile_id (char) -> S_db tile (H x W, single).
+% boxes_map: maps tile_id (char) -> GT boxes (N x 4) in [x0,y0,w,h].
+% We use a single low-level HDF5 file handle for fast per-tile reads.
+% ------------------------------------------------------------------
+tiles_map = containers.Map('KeyType','char','ValueType','any');
+boxes_map = containers.Map('KeyType','char','ValueType','any');
+
+fprintf('CFAR evaluator: preloading %d tiles into memory...\n', n_images);
+preload_log_every = max(1, floor(n_images / 20));
+
+% Open HDF5 file once for faster per-tile reads
+h5_file_id = H5F.open(h5_path, 'H5F_ACC_RDONLY', 'H5P_DEFAULT');
+
+for k = 1:n_images
+    if mod(k, preload_log_every) == 0 || k == 1 || k == n_images
+        fprintf('  Preload: tile %d / %d (%.1f%%%%)\n', ...
+            k, n_images, 100 * k / n_images);
+    end
+
+    tile_id = strtrim(test_ids(k));
+    tile_id = char(tile_id);
+
+    % Load STFT tile (in dB) and store using low-level HDF5.
+    % h5_read_dataset returns the raw dataset stored at
+    %   group_path = '/S_db', dset_name = tile_id.
+    s_db = h5_read_dataset(h5_file_id, '/S_db', tile_id);
+    tiles_map(tile_id) = s_db;  % keep as single; convert to double later
+
+    % Load GT boxes for this tile. Not all tiles have /boxes/<id>,
+    % so use try/catch to avoid a global group scan. Missing dataset
+    % is treated as "no targets in this tile".
+    try
+        gt_boxes = h5_read_dataset(h5_file_id, '/boxes', tile_id);
+        gt_boxes = double(gt_boxes);
+        if size(gt_boxes, 2) ~= 4 && size(gt_boxes, 1) == 4
+            gt_boxes = gt_boxes.';
+        end
+    catch
+        % Missing dataset => no boxes
+        gt_boxes = zeros(0, 4);
+    end
+    boxes_map(tile_id) = gt_boxes;
+end
+
+H5F.close(h5_file_id);
+
+fprintf('CFAR evaluator: preload done. Running CFAR on all tiles...\n');
+
+
+% ------------------------------------------------------------------
+% Create CFAR detector and process all tiles from memory
+% ------------------------------------------------------------------
+cfar2d = phased.CFARDetector2D( ...
+    'Method', 'CA', ...
+    'GuardBandSize',    cfg.GuardBandSize, ...
+    'TrainingBandSize', cfg.TrainingBandSize, ...
+    'ProbabilityFalseAlarm', cfg.Pfa, ...
+    'OutputFormat', 'CUT result', ...
+    'ThresholdOutputPort', false);
+
+total_tp = 0;
+total_fp = 0;
+total_fn = 0;
+total_gt = 0;
+total_pred = 0;
+
+inference_time = 0.0;
+
+fprintf('CFAR evaluator: processing %d tiles...\n', n_images);
+
+for k = 1:n_images
+    if mod(k, log_every) == 0 || k == 1 || k == n_images
+        fprintf('  CFAR evaluator: tile %d / %d (%.1f%%%%)\n', ...
+            k, n_images, 100 * k / n_images);
+    end
+
+    tile_id = strtrim(test_ids(k));
+    tile_id = char(tile_id);
+
+    % Convert STFT tile from dB to linear power for CFAR.
+    % s_db: H x W, where H=fft_size (frequency bins), W=frames_per_image.
+    s_db = tiles_map(tile_id);
+    s_db = double(s_db);
+    s_power = 10.^(s_db / 10.0);
+
+    % CFAR operates only on valid CUT (cell under test) locations.
+    % We build cutidx to include all interior pixels whose full
+    % training+guard window lies completely inside the tile. Pixels
+    % near the borders are never tested and remain 0 in det_mask.
+    [H, W] = size(s_power);
+    gr = cfg.GuardBandSize(1); gc = cfg.GuardBandSize(2);
+    tr = cfg.TrainingBandSize(1); tc = cfg.TrainingBandSize(2);
+
+    row_min = 1 + tr + gr;
+    row_max = H - tr - gr;
+    col_min = 1 + tc + gc;
+    col_max = W - tc - gc;
+
+    if row_min > row_max || col_min > col_max
+        % Window too big for this tile; skip detections
+        det_mask = false(H, W);
+        tile_time = 0;
     else
-        error('dataset_root must be a string or char path.');
+        % Enumerate all valid CUT positions on a regular grid.
+        % rrow, ccol are HxW grids of row/col indices restricted
+        % to the interior, then reshaped into a 2 x D index matrix.
+        [ccol, rrow] = meshgrid(col_min:col_max, row_min:row_max);
+        cutidx = [rrow(:).'; ccol(:).'];
+
+        % Run CA-CFAR on all CUT cells in one shot. The output y
+        % is a logical-valued vector (0/1) of length D indicating
+        % whether each CUT exceeded the adaptive threshold.
+        t_start = tic;
+        y = cfar2d(s_power, cutidx);  % y is 1xD or Dx1
+        tile_time = toc(t_start);
+
+        % Scatter the D-element detection vector back into an HxW
+        % binary mask, marking only the tested CUT positions.
+        det_mask = false(H, W);
+        det_mask(sub2ind([H, W], cutidx(1, :), cutidx(2, :))) = logical(y(:)).';
     end
 
-    h5_path = fullfile(dataset_root, 'tensors', 'tiles.h5');
-    splits_dir = fullfile(dataset_root, 'splits');
-    test_list_path = fullfile(splits_dir, 'val.txt');
+    inference_time = inference_time + tile_time;
 
-    if ~isfile(h5_path)
-        error('HDF5 file not found: %s', h5_path);
-    end
-    if ~isfile(test_list_path)
-        error('Test split file not found: %s', test_list_path);
+    % Optionally prune very small detection blobs which are likely
+    % to be noise speckles rather than real bursts.
+    if cfg.MinArea > 1
+        det_mask = bwareaopen(det_mask, round(cfg.MinArea));
     end
 
-    if ~isempty(cfg.TileIds)
-        test_ids = cfg.TileIds;
+    % Group detected pixels into connected components (8-connectivity)
+    % so that each blob can be summarized by a single bounding box.
+    cc = bwconncomp(det_mask);
+    if cc.NumObjects == 0
+        pred_boxes = zeros(0, 4);
     else
-        test_ids = read_id_list(test_list_path);
-    end
-    n_images = numel(test_ids);
-    if n_images == 0
-        error('Test split is empty.');
-    end
-
-    % Simple progress logging (for processing phase)
-    log_every = max(1, floor(n_images / 20));  % ~5%% steps
-
-    % ------------------------------------------------------------------
-    % Preload all tiles and GT boxes into memory to avoid HDF5 overhead.
-    %
-    % tiles_map: maps tile_id (char) -> S_db tile (H x W, single).
-    % boxes_map: maps tile_id (char) -> GT boxes (N x 4) in [x0,y0,w,h].
-    % We use a single low-level HDF5 file handle for fast per-tile reads.
-    % ------------------------------------------------------------------
-    tiles_map = containers.Map('KeyType','char','ValueType','any');
-    boxes_map = containers.Map('KeyType','char','ValueType','any');
-
-    fprintf('CFAR evaluator: preloading %d tiles into memory...\n', n_images);
-    preload_log_every = max(1, floor(n_images / 20));
-
-    % Open HDF5 file once for faster per-tile reads
-    h5_file_id = H5F.open(h5_path, 'H5F_ACC_RDONLY', 'H5P_DEFAULT');
-
-    for k = 1:n_images
-        if mod(k, preload_log_every) == 0 || k == 1 || k == n_images
-            fprintf('  Preload: tile %d / %d (%.1f%%%%)\n', ...
-                k, n_images, 100 * k / n_images);
-        end
-
-        tile_id = strtrim(test_ids(k));
-        tile_id = char(tile_id);
-
-        % Load STFT tile (in dB) and store using low-level HDF5.
-        % h5_read_dataset returns the raw dataset stored at
-        %   group_path = '/S_db', dset_name = tile_id.
-        s_db = h5_read_dataset(h5_file_id, '/S_db', tile_id);
-        tiles_map(tile_id) = s_db;  % keep as single; convert to double later
-
-        % Load GT boxes for this tile. Not all tiles have /boxes/<id>,
-        % so use try/catch to avoid a global group scan. Missing dataset
-        % is treated as "no targets in this tile".
-        try
-            gt_boxes = h5_read_dataset(h5_file_id, '/boxes', tile_id);
-            gt_boxes = double(gt_boxes);
-            if size(gt_boxes, 2) ~= 4 && size(gt_boxes, 1) == 4
-                gt_boxes = gt_boxes.';
-            end
-        catch
-            % Missing dataset => no boxes
-            gt_boxes = zeros(0, 4);
-        end
-        boxes_map(tile_id) = gt_boxes;
+        % regionprops returns axis-aligned bounding rectangles for
+        % each blob in [x,y,width,height] format, where x/y are
+        % 1-based pixel coordinates with 0.5 offsets. We convert
+        % them to the dataset convention [x0,y0,w,h] with 0-based
+        % integer coordinates.
+        stats = regionprops(cc, 'BoundingBox');
+        bb = vertcat(stats.BoundingBox);
+        H = size(det_mask, 1);
+        W = size(det_mask, 2);
+        % Approximate conversion: shift origin by 1 and round.
+        x0 = bb(:, 1) - 1;
+        y0 = bb(:, 2) - 1;
+        w  = bb(:, 3);
+        h  = bb(:, 4);
+        x0 = round(x0);
+        y0 = round(y0);
+        w  = round(w);
+        h  = round(h);
+        x0 = max(0, min(W - 1, x0));
+        y0 = max(0, min(H - 1, y0));
+        w  = max(1, min(W - x0, w));
+        h  = max(1, min(H - y0, h));
+        pred_boxes = [x0, y0, w, h];
     end
 
-    H5F.close(h5_file_id);
+    gt_boxes = boxes_map(tile_id);
 
-    fprintf('CFAR evaluator: preload done. Running CFAR on all tiles...\n');
+    [tp, fp, fn, ngt, npred] = eval_tile_boxes(gt_boxes, pred_boxes, cfg.IoUThreshold);
 
+    total_tp = total_tp + tp;
+    total_fp = total_fp + fp;
+    total_fn = total_fn + fn;
+    total_gt = total_gt + ngt;
+    total_pred = total_pred + npred;
+end
 
-    % ------------------------------------------------------------------
-    % Create CFAR detector and process all tiles from memory
-    % ------------------------------------------------------------------
-    cfar2d = phased.CFARDetector2D( ...
-        'Method', 'CA', ...
-        'GuardBandSize',    cfg.GuardBandSize, ...
-        'TrainingBandSize', cfg.TrainingBandSize, ...
-        'ProbabilityFalseAlarm', cfg.Pfa, ...
-        'OutputFormat', 'CUT result', ...
-        'ThresholdOutputPort', false);
+precision = total_tp / (total_tp + total_fp);
+if ~isfinite(precision)
+    precision = 0.0;
+end
+recall = total_tp / (total_tp + total_fn);
+if ~isfinite(recall)
+    recall = 0.0;
+end
+if (precision + recall) > 0
+    f1 = 2 * precision * recall / (precision + recall);
+else
+    f1 = 0.0;
+end
 
-    total_tp = 0;
-    total_fp = 0;
-    total_fn = 0;
-    total_gt = 0;
-    total_pred = 0;
+avg_time_ms = 1000 * inference_time / n_images;
 
-    inference_time = 0.0;
+summary = sprintf([ ...
+    'STFT Evaluation Results\n', ...
+    '-----------------------\n', ...
+    'Total GT boxes:   %d\n', ...
+    'Total predictions:%d\n', ...
+    'TP: %d, FP: %d, FN: %d\n', ...
+    'Precision: %.4f\n', ...
+    'Recall:    %.4f\n', ...
+    'F1 Score:  %.4f\n', ...
+    'Avg inference time: %.2f ms/image\n' ...
+    ], total_gt, total_pred, total_tp, total_fp, total_fn, precision, recall, f1, avg_time_ms);
 
-    fprintf('CFAR evaluator: processing %d tiles...\n', n_images);
-
-    for k = 1:n_images
-        if mod(k, log_every) == 0 || k == 1 || k == n_images
-            fprintf('  CFAR evaluator: tile %d / %d (%.1f%%%%)\n', ...
-                k, n_images, 100 * k / n_images);
-        end
-
-        tile_id = strtrim(test_ids(k));
-        tile_id = char(tile_id);
-
-        % Convert STFT tile from dB to linear power for CFAR.
-        % s_db: H x W, where H=fft_size (frequency bins), W=frames_per_image.
-        s_db = tiles_map(tile_id);
-        s_db = double(s_db);
-        s_power = 10.^(s_db / 10.0);
-
-        % CFAR operates only on valid CUT (cell under test) locations.
-        % We build cutidx to include all interior pixels whose full
-        % training+guard window lies completely inside the tile. Pixels
-        % near the borders are never tested and remain 0 in det_mask.
-        [H, W] = size(s_power);
-        gr = cfg.GuardBandSize(1); gc = cfg.GuardBandSize(2);
-        tr = cfg.TrainingBandSize(1); tc = cfg.TrainingBandSize(2);
-
-        row_min = 1 + tr + gr;
-        row_max = H - tr - gr;
-        col_min = 1 + tc + gc;
-        col_max = W - tc - gc;
-
-        if row_min > row_max || col_min > col_max
-            % Window too big for this tile; skip detections
-            det_mask = false(H, W);
-            tile_time = 0;
-        else
-            % Enumerate all valid CUT positions on a regular grid.
-            % rrow, ccol are HxW grids of row/col indices restricted
-            % to the interior, then reshaped into a 2 x D index matrix.
-            [ccol, rrow] = meshgrid(col_min:col_max, row_min:row_max);
-            cutidx = [rrow(:).'; ccol(:).'];
-
-            % Run CA-CFAR on all CUT cells in one shot. The output y
-            % is a logical-valued vector (0/1) of length D indicating
-            % whether each CUT exceeded the adaptive threshold.
-            t_start = tic;
-            y = cfar2d(s_power, cutidx);  % y is 1xD or Dx1
-            tile_time = toc(t_start);
-
-            % Scatter the D-element detection vector back into an HxW
-            % binary mask, marking only the tested CUT positions.
-            det_mask = false(H, W);
-            det_mask(sub2ind([H, W], cutidx(1, :), cutidx(2, :))) = logical(y(:)).';
-        end
-
-        inference_time = inference_time + tile_time;
-
-        % Optionally prune very small detection blobs which are likely
-        % to be noise speckles rather than real bursts.
-        if cfg.MinArea > 1
-            det_mask = bwareaopen(det_mask, round(cfg.MinArea));
-        end
-
-        % Group detected pixels into connected components (8-connectivity)
-        % so that each blob can be summarized by a single bounding box.
-        cc = bwconncomp(det_mask);
-        if cc.NumObjects == 0
-            pred_boxes = zeros(0, 4);
-        else
-            % regionprops returns axis-aligned bounding rectangles for
-            % each blob in [x,y,width,height] format, where x/y are
-            % 1-based pixel coordinates with 0.5 offsets. We convert
-            % them to the dataset convention [x0,y0,w,h] with 0-based
-            % integer coordinates.
-            stats = regionprops(cc, 'BoundingBox');
-            bb = vertcat(stats.BoundingBox);
-            H = size(det_mask, 1);
-            W = size(det_mask, 2);
-            % Approximate conversion: shift origin by 1 and round.
-            x0 = bb(:, 1) - 1;
-            y0 = bb(:, 2) - 1;
-            w  = bb(:, 3);
-            h  = bb(:, 4);
-            x0 = round(x0);
-            y0 = round(y0);
-            w  = round(w);
-            h  = round(h);
-            x0 = max(0, min(W - 1, x0));
-            y0 = max(0, min(H - 1, y0));
-            w  = max(1, min(W - x0, w));
-            h  = max(1, min(H - y0, h));
-            pred_boxes = [x0, y0, w, h];
-        end
-
-        gt_boxes = boxes_map(tile_id);
-
-        [tp, fp, fn, ngt, npred] = eval_tile_boxes(gt_boxes, pred_boxes, cfg.IoUThreshold);
-
-        total_tp = total_tp + tp;
-        total_fp = total_fp + fp;
-        total_fn = total_fn + fn;
-        total_gt = total_gt + ngt;
-        total_pred = total_pred + npred;
-    end
-
-    precision = total_tp / (total_tp + total_fp);
-    if ~isfinite(precision)
-        precision = 0.0;
-    end
-    recall = total_tp / (total_tp + total_fn);
-    if ~isfinite(recall)
-        recall = 0.0;
-    end
-    if (precision + recall) > 0
-        f1 = 2 * precision * recall / (precision + recall);
-    else
-        f1 = 0.0;
-    end
-
-    avg_time_ms = 1000 * inference_time / n_images;
-
-    summary = sprintf([ ...
-        'STFT Evaluation Results\n', ...
-        '-----------------------\n', ...
-        'Total GT boxes:   %d\n', ...
-        'Total predictions:%d\n', ...
-        'TP: %d, FP: %d, FN: %d\n', ...
-        'Precision: %.4f\n', ...
-        'Recall:    %.4f\n', ...
-        'F1 Score:  %.4f\n', ...
-        'Avg inference time: %.2f ms/image\n' ...
-        ], total_gt, total_pred, total_tp, total_fp, total_fn, precision, recall, f1, avg_time_ms);
-
-    fprintf('%s\n', summary);
+fprintf('%s\n', summary);
 end
 
 
 function data = h5_read_dataset(file_id, group_path, dset_name)
-    % Read a dataset from an open HDF5 file using low-level API.
-    % Mirrors the h5_write_dataset helper used in generate_training_signal.m
+% Read a dataset from an open HDF5 file using low-level API.
+% Mirrors the h5_write_dataset helper used in generate_training_signal.m
 
-    group_id = H5G.open(file_id, group_path);
-    dset_id  = H5D.open(group_id, dset_name);
+group_id = H5G.open(file_id, group_path);
+dset_id  = H5D.open(group_id, dset_name);
 
-    data = H5D.read(dset_id, 'H5ML_DEFAULT', 'H5S_ALL', 'H5S_ALL', 'H5P_DEFAULT');
+data = H5D.read(dset_id, 'H5ML_DEFAULT', 'H5S_ALL', 'H5S_ALL', 'H5P_DEFAULT');
 
-    H5D.close(dset_id);
-    H5G.close(group_id);
+H5D.close(dset_id);
+H5G.close(group_id);
 end
 
 
 function ids = read_id_list(path)
-    txt = fileread(path);
-    if isempty(txt)
-        ids = strings(0, 1);
-    else
-        parts = regexp(txt, '\r?\n', 'split');
-        parts = parts(~cellfun('isempty', parts));
-        ids = string(parts(:));
-    end
+txt = fileread(path);
+if isempty(txt)
+    ids = strings(0, 1);
+else
+    parts = regexp(txt, '\r?\n', 'split');
+    parts = parts(~cellfun('isempty', parts));
+    ids = string(parts(:));
+end
 end
 
 
 function [tp, fp, fn, n_gt, n_pred] = eval_tile_boxes(gt_boxes, pred_boxes, iou_thr)
-    if isempty(gt_boxes)
-        n_gt = 0;
-    else
-        n_gt = size(gt_boxes, 1);
-    end
-    if isempty(pred_boxes)
-        n_pred = 0;
-    else
-        n_pred = size(pred_boxes, 1);
-    end
+if isempty(gt_boxes)
+    n_gt = 0;
+else
+    n_gt = size(gt_boxes, 1);
+end
+if isempty(pred_boxes)
+    n_pred = 0;
+else
+    n_pred = size(pred_boxes, 1);
+end
 
-    if n_pred == 0 && n_gt == 0
-        tp = 0; fp = 0; fn = 0;
-        return;
-    elseif n_pred == 0
-        tp = 0; fp = 0; fn = n_gt;
-        return;
-    elseif n_gt == 0
-        tp = 0; fp = n_pred; fn = 0;
-        return;
+if n_pred == 0 && n_gt == 0
+    tp = 0; fp = 0; fn = 0;
+    return;
+elseif n_pred == 0
+    tp = 0; fp = 0; fn = n_gt;
+    return;
+elseif n_gt == 0
+    tp = 0; fp = n_pred; fn = 0;
+    return;
+end
+
+iou_mat = compute_iou_matrix(gt_boxes, pred_boxes);
+
+tp = 0;
+matched_gt = false(n_gt, 1);
+for j = 1:n_pred
+    ious = iou_mat(:, j);
+    [best_iou, best_idx] = max(ious);
+    if best_iou >= iou_thr && ~matched_gt(best_idx)
+        tp = tp + 1;
+        matched_gt(best_idx) = true;
     end
+end
 
-    iou_mat = compute_iou_matrix(gt_boxes, pred_boxes);
-
-    tp = 0;
-    matched_gt = false(n_gt, 1);
-    for j = 1:n_pred
-        ious = iou_mat(:, j);
-        [best_iou, best_idx] = max(ious);
-        if best_iou >= iou_thr && ~matched_gt(best_idx)
-            tp = tp + 1;
-            matched_gt(best_idx) = true;
-        end
-    end
-
-    fp = n_pred - tp;
-    fn = n_gt - sum(matched_gt);
+fp = n_pred - tp;
+fn = n_gt - sum(matched_gt);
 end
 
 
 function iou_mat = compute_iou_matrix(gt_boxes, pred_boxes)
-    % Compute full pairwise IoU matrix between all GT and predicted
-    % boxes. Both inputs are N x 4 with [x0,y0,w,h] in 0-based pixel
-    % coordinates. This is used by eval_tile_boxes() for greedy
-    % matching.
-    n_gt = size(gt_boxes, 1);
-    n_pred = size(pred_boxes, 1);
-    iou_mat = zeros(n_gt, n_pred);
-    for i = 1:n_gt
-        for j = 1:n_pred
-            iou_mat(i, j) = bbox_iou_xywh(gt_boxes(i, :), pred_boxes(j, :));
-        end
+% Compute full pairwise IoU matrix between all GT and predicted
+% boxes. Both inputs are N x 4 with [x0,y0,w,h] in 0-based pixel
+% coordinates. This is used by eval_tile_boxes() for greedy
+% matching.
+n_gt = size(gt_boxes, 1);
+n_pred = size(pred_boxes, 1);
+iou_mat = zeros(n_gt, n_pred);
+for i = 1:n_gt
+    for j = 1:n_pred
+        iou_mat(i, j) = bbox_iou_xywh(gt_boxes(i, :), pred_boxes(j, :));
     end
+end
 end
 
 
 function iou = bbox_iou_xywh(a, b)
-    ax1 = a(1);
-    ay1 = a(2);
-    ax2 = a(1) + a(3) - 1;
-    ay2 = a(2) + a(4) - 1;
+ax1 = a(1);
+ay1 = a(2);
+ax2 = a(1) + a(3) - 1;
+ay2 = a(2) + a(4) - 1;
 
-    bx1 = b(1);
-    by1 = b(2);
-    bx2 = b(1) + b(3) - 1;
-    by2 = b(2) + b(4) - 1;
+bx1 = b(1);
+by1 = b(2);
+bx2 = b(1) + b(3) - 1;
+by2 = b(2) + b(4) - 1;
 
-    ix1 = max(ax1, bx1);
-    iy1 = max(ay1, by1);
-    ix2 = min(ax2, bx2);
-    iy2 = min(ay2, by2);
+ix1 = max(ax1, bx1);
+iy1 = max(ay1, by1);
+ix2 = min(ax2, bx2);
+iy2 = min(ay2, by2);
 
-    iw = max(0, ix2 - ix1 + 1);
-    ih = max(0, iy2 - iy1 + 1);
-    inter = iw * ih;
+iw = max(0, ix2 - ix1 + 1);
+ih = max(0, iy2 - iy1 + 1);
+inter = iw * ih;
 
-    area_a = a(3) * a(4);
-    area_b = b(3) * b(4);
-    union_ab = area_a + area_b - inter;
+area_a = a(3) * a(4);
+area_b = b(3) * b(4);
+union_ab = area_a + area_b - inter;
 
-    if union_ab <= 0
-        iou = 0.0;
-    else
-        iou = inter / union_ab;
-    end
+if union_ab <= 0
+    iou = 0.0;
+else
+    iou = inter / union_ab;
+end
 end
