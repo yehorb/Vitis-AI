@@ -1,7 +1,24 @@
-clear; clc;
+function generate_training_signal(varargin)
+p = inputParser;
+addParameter(p, 'RunId', '');
+% RNG for reproducible signal
+addParameter(p, 'Seed', 1);
+% seconds, approx 5000 tiles
+addParameter(p, 'TotalDuration', 6.0);
+% 5 db is a heuristic "threshold" for CFAR detector
+addParameter(p, 'SnrMax', 5);
+addParameter(p, 'SnrMin', -15);
+addParameter(p, 'NTrain', 0.8);
+addParameter(p, 'NVal', 0.1);
+parse(p, varargin{:});
+args = p.Results;
 
 % run/session identifier for filenames
-run_id = datestr(now,'yyyymmdd_HHMMSS');  % e.g., 20250928_231045
+if ~isempty(args.RunId)
+    run_id = string(args.RunId);
+else
+    run_id = string(datetime('now','Format','yyyyMMdd_HHmmss'));  % e.g., 20250928_231045
+end
 
 % ------------------------- DATASET PATHS -------------------------
 ds.root        = "../../data/stft/" + run_id;
@@ -27,17 +44,16 @@ stft.window_type           = 'hann';
 stft.window_length_samples = stft.fft_size;
 stft.overlap_samples       = stft.fft_size/2;
 stft.centered              = true;
-stft.frames_per_image      = 128;    % tile width (W); tile height (H)=fft_size
+stft.frames_per_image      = 128;  % tile width (W); tile height (H)=fft_size
 
 % ------------------------- SIGNAL GENERATION ---------------------
-cfg.seed           = 1;          % RNG for reproducible signal
-cfg.total_duration = 6.000;      % seconds, approx 5000 tiles
-cfg.noise_power_db = -80;        % mean noise power in dB
+cfg.seed           = args.Seed;
+cfg.total_duration = args.TotalDuration;
+cfg.noise_power_db = -80;  % mean noise power in dB
 
 % Add a slight margin to avoid generating signals right on an edge
 rngs.freq_min = -4.5e6; rngs.freq_max = 4.5e6;
-% 5 db is a heuristic "threshold" for CFAR detector, we add a bit more
-rngs.snr_min = -15; rngs.snr_max = 5;
+rngs.snr_min = args.SnrMin; rngs.snr_max = args.SnrMax;
 
 rngs.pw_min  = 20e-6;  rngs.pw_max  = 120e-6;
 rngs.per_min = 150e-6; rngs.per_max = 400e-6;
@@ -403,8 +419,8 @@ fid = fopen(ds.labelmap,'w'); fwrite(fid, jsonencode(label_map,'PrettyPrint',tru
 % ------------------------- SPLITS -------------------------------
 N = numel(image_ids);
 idx = randperm(N);
-n_train = round(0.8*N);
-n_val   = round(0.1*N);
+n_train = round(args.NTrain*N);
+n_val   = round(args.NVal*N);
 train_ids = image_ids(idx(1:n_train));
 val_ids   = image_ids(idx(n_train+1:n_train+n_val));
 test_ids  = image_ids(idx(n_train+n_val+1:end));
@@ -438,9 +454,11 @@ end
 
 fprintf('Done. Tiles=%d | train=%d val=%d test=%d | overlap=%d (%s) | run_id=%s\n', ...
     N, numel(train_ids), numel(val_ids), numel(test_ids), overlap.enable, overlap.mode, run_id);
+end
 
 % ------------------------- HELPERS -------------------------------
 function write_list(path, arr)
+if isempty(arr), return; end
 fid = fopen(path, 'w');
 for i=1:numel(arr), fprintf(fid, '%s\n', arr(i)); end
 fclose(fid);
@@ -450,16 +468,6 @@ function h5writeatt_safe(h5path, loc, key, val)
 if islogical(val), val = uint8(val); end
 if isa(val,'string'), val = char(val); end
 h5writeatt(h5path, loc, key, val);
-end
-
-function h5create_safe(h5path, dset, sz, dtype, chunks, deflate)
-if exist(h5path,'file')
-    try, h5info(h5path, dset); return; catch, end
-end
-args = {'Datatype', dtype};
-if ~isempty(chunks), args = [args, {'ChunkSize', chunks}]; end
-if ~isempty(deflate) && deflate>0, args = [args, {'Deflate', deflate}]; end
-h5create(h5path, dset, sz, args{:});
 end
 
 function h5_write_dataset(file_id, group_path, dset_name, data, dtype, deflate_level)
