@@ -79,9 +79,6 @@ if n_images == 0
     error('Test split is empty.');
 end
 
-% Simple progress logging (for processing phase)
-log_every = max(1, floor(n_images / 20));  % ~5%% steps
-
 % ------------------------------------------------------------------
 % Preload all tiles and GT boxes into memory to avoid HDF5 overhead.
 %
@@ -135,28 +132,14 @@ fprintf('CFAR evaluator: preload done. Running CFAR on all tiles...\n');
 
 
 % ------------------------------------------------------------------
-% Stack all tiles into a 3D array for vectorized CFAR processing
+% Prepare data for parallel processing
 % ------------------------------------------------------------------
-fprintf('CFAR evaluator: stacking tiles into 3D array...\n');
-
 % Get tile dimensions from first tile (assume all tiles are same size)
 first_id = char(strtrim(test_ids(1)));
 first_tile = tiles_map(first_id);
 [H, W] = size(first_tile);
 
-% Preallocate 3D power array: H x W x n_images
-s_power_3d = zeros(H, W, n_images);
-
-% Fill the 3D array, converting dB -> linear power
-for k = 1:n_images
-    tile_id = char(strtrim(test_ids(k)));
-    s_db = double(tiles_map(tile_id));
-    s_power_3d(:, :, k) = 10.^(s_db / 10.0);
-end
-
-% ------------------------------------------------------------------
 % Compute CUT indices once (same for all tiles)
-% ------------------------------------------------------------------
 gr = cfg.GuardBandSize(1); gc = cfg.GuardBandSize(2);
 tr = cfg.TrainingBandSize(1); tc = cfg.TrainingBandSize(2);
 
@@ -169,85 +152,95 @@ if row_min > row_max || col_min > col_max
     error('Guard + training band too large for tile size %dx%d', H, W);
 end
 
-% Enumerate all valid CUT positions on a regular grid.
 [ccol, rrow] = meshgrid(col_min:col_max, row_min:row_max);
 cutidx = [rrow(:).'; ccol(:).'];
 n_cuts = size(cutidx, 2);
 
+% Precompute linear indices for scattering detections
+cut_lin_idx = sub2ind([H, W], cutidx(1, :), cutidx(2, :));
+
 fprintf('CFAR evaluator: tile size %dx%d, %d CUT cells per tile\n', H, W, n_cuts);
 
-% ------------------------------------------------------------------
-% Create CFAR detector and run on entire 3D array at once
-% ------------------------------------------------------------------
-cfar2d = phased.CFARDetector2D( ...
-    'Method', 'CA', ...
-    'GuardBandSize',    cfg.GuardBandSize, ...
-    'TrainingBandSize', cfg.TrainingBandSize, ...
-    'ProbabilityFalseAlarm', cfg.Pfa, ...
-    'OutputFormat', 'CUT result', ...
-    'ThresholdOutputPort', false);
+% Convert Map to cell arrays for parfor slicing
+tiles_cell = cell(n_images, 1);
+boxes_cell = cell(n_images, 1);
+for k = 1:n_images
+    tile_id = char(strtrim(test_ids(k)));
+    tiles_cell{k} = double(tiles_map(tile_id));
+    boxes_cell{k} = boxes_map(tile_id);
+end
 
-fprintf('CFAR evaluator: running CFAR on %d tiles (vectorized)...\n', n_images);
+% Clear maps to free memory
+clear tiles_map boxes_map;
+
+% ------------------------------------------------------------------
+% Run CFAR + evaluation in parallel using parfor
+% ------------------------------------------------------------------
+% Preallocate output arrays (parfor requires fixed-size sliced outputs)
+tp_arr = zeros(n_images, 1);
+fp_arr = zeros(n_images, 1);
+fn_arr = zeros(n_images, 1);
+ngt_arr = zeros(n_images, 1);
+npred_arr = zeros(n_images, 1);
+
+% Extract config values for parfor (avoid broadcast of entire struct)
+pfa = cfg.Pfa;
+guard_size = cfg.GuardBandSize;
+train_size = cfg.TrainingBandSize;
+min_area = cfg.MinArea;
+coverage_thr = cfg.CoverageThreshold;
+
+fprintf('CFAR evaluator: running CFAR + eval on %d tiles (parfor)...\n', n_images);
 
 t_start = tic;
-% cfar2d on M-by-N-by-P array returns D-by-P logical matrix
-y_all = cfar2d(s_power_3d, cutidx);  % n_cuts x n_images
+
+parfor k = 1:n_images
+    % Convert dB -> linear power
+    s_db = tiles_cell{k};
+    s_power = 10.^(s_db / 10.0);
+
+    % Create CFAR detector (one per worker)
+    cfar_det = phased.CFARDetector2D( ...
+        'Method', 'CA', ...
+        'GuardBandSize', guard_size, ...
+        'TrainingBandSize', train_size, ...
+        'ProbabilityFalseAlarm', pfa, ...
+        'OutputFormat', 'CUT result', ...
+        'ThresholdOutputPort', false);
+
+    % Run CFAR
+    y = cfar_det(s_power, cutidx);
+
+    % Scatter to detection mask
+    det_mask = false(H, W);
+    det_mask(cut_lin_idx) = logical(y(:));
+
+    % Prune small blobs
+    if min_area > 1
+        det_mask = bwareaopen(det_mask, round(min_area));
+    end
+
+    % Evaluate coverage
+    gt_boxes = boxes_cell{k};
+    [tp, fp, fn, ngt, npred] = eval_tile_coverage(det_mask, gt_boxes, coverage_thr);
+
+    tp_arr(k) = tp;
+    fp_arr(k) = fp;
+    fn_arr(k) = fn;
+    ngt_arr(k) = ngt;
+    npred_arr(k) = npred;
+end
+
 inference_time = toc(t_start);
 
-fprintf('CFAR evaluator: CFAR complete in %.2f seconds\n', inference_time);
+fprintf('CFAR evaluator: complete in %.2f seconds\n', inference_time);
 
-% ------------------------------------------------------------------
-% Scatter detections into 3D mask array (vectorized)
-% ------------------------------------------------------------------
-% Convert 2D CUT subscripts to linear indices (same for all tiles)
-cut_lin_idx = sub2ind([H, W], cutidx(1, :), cutidx(2, :));  % 1 x n_cuts
-
-% Preallocate 3D detection mask
-det_masks_3d = false(H, W, n_images);
-
-% Scatter all detections at once using linear indexing
-% For each tile k, we set det_masks_3d(cut_lin_idx, k) = y_all(:, k)
-for k = 1:n_images
-    det_masks_3d(cut_lin_idx + (k-1)*H*W) = y_all(:, k);
-end
-
-% ------------------------------------------------------------------
-% Evaluate each tile (coverage metrics require per-tile GT boxes)
-% ------------------------------------------------------------------
-total_tp = 0;
-total_fp = 0;
-total_fn = 0;
-total_gt = 0;
-total_pred = 0;
-
-fprintf('CFAR evaluator: evaluating %d tiles...\n', n_images);
-
-for k = 1:n_images
-    if mod(k, log_every) == 0 || k == 1 || k == n_images
-        fprintf('  Evaluating: tile %d / %d (%.1f%%%%)\n', ...
-            k, n_images, 100 * k / n_images);
-    end
-
-    det_mask = det_masks_3d(:, :, k);
-
-    % Optionally prune very small detection blobs
-    if cfg.MinArea > 1
-        det_mask = bwareaopen(det_mask, round(cfg.MinArea));
-    end
-
-    % Get GT boxes for this tile
-    tile_id = char(strtrim(test_ids(k)));
-    gt_boxes = boxes_map(tile_id);
-
-    % Evaluate using pixel-coverage approach
-    [tp, fp, fn, ngt, npred] = eval_tile_coverage(det_mask, gt_boxes, cfg.CoverageThreshold);
-
-    total_tp = total_tp + tp;
-    total_fp = total_fp + fp;
-    total_fn = total_fn + fn;
-    total_gt = total_gt + ngt;
-    total_pred = total_pred + npred;
-end
+% Aggregate results
+total_tp = sum(tp_arr);
+total_fp = sum(fp_arr);
+total_fn = sum(fn_arr);
+total_gt = sum(ngt_arr);
+total_pred = sum(npred_arr);
 
 precision = total_tp / (total_tp + total_fp);
 if ~isfinite(precision)
@@ -364,24 +357,24 @@ for i = 1:n_gt
     y0 = gt_boxes(i, 2);
     bw = gt_boxes(i, 3);
     bh = gt_boxes(i, 4);
-    
+
     % Convert to 1-based MATLAB indices and clamp to image bounds
     col_min = max(1, x0 + 1);
     col_max = min(W, x0 + bw);
     row_min = max(1, y0 + 1);
     row_max = min(H, y0 + bh);
-    
+
     if row_min > row_max || col_min > col_max
         % Box is outside image bounds or degenerate
         fn = fn + 1;
         continue;
     end
-    
+
     % Count detected pixels inside this GT box
     box_region = det_mask(row_min:row_max, col_min:col_max);
     detected_pixels = sum(box_region(:));
     box_area = bw * bh;
-    
+
     if box_area > 0 && (detected_pixels / box_area) >= coverage_thr
         tp = tp + 1;
     else
@@ -397,12 +390,12 @@ for i = 1:n_gt
     y0 = gt_boxes(i, 2);
     bw = gt_boxes(i, 3);
     bh = gt_boxes(i, 4);
-    
+
     col_min = max(1, x0 + 1);
     col_max = min(W, x0 + bw);
     row_min = max(1, y0 + 1);
     row_max = min(H, y0 + bh);
-    
+
     if row_min <= row_max && col_min <= col_max
         gt_mask(row_min:row_max, col_min:col_max) = true;
     end
