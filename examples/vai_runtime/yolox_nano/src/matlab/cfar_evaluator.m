@@ -135,7 +135,49 @@ fprintf('CFAR evaluator: preload done. Running CFAR on all tiles...\n');
 
 
 % ------------------------------------------------------------------
-% Create CFAR detector and process all tiles from memory
+% Stack all tiles into a 3D array for vectorized CFAR processing
+% ------------------------------------------------------------------
+fprintf('CFAR evaluator: stacking tiles into 3D array...\n');
+
+% Get tile dimensions from first tile (assume all tiles are same size)
+first_id = char(strtrim(test_ids(1)));
+first_tile = tiles_map(first_id);
+[H, W] = size(first_tile);
+
+% Preallocate 3D power array: H x W x n_images
+s_power_3d = zeros(H, W, n_images);
+
+% Fill the 3D array, converting dB -> linear power
+for k = 1:n_images
+    tile_id = char(strtrim(test_ids(k)));
+    s_db = double(tiles_map(tile_id));
+    s_power_3d(:, :, k) = 10.^(s_db / 10.0);
+end
+
+% ------------------------------------------------------------------
+% Compute CUT indices once (same for all tiles)
+% ------------------------------------------------------------------
+gr = cfg.GuardBandSize(1); gc = cfg.GuardBandSize(2);
+tr = cfg.TrainingBandSize(1); tc = cfg.TrainingBandSize(2);
+
+row_min = 1 + tr + gr;
+row_max = H - tr - gr;
+col_min = 1 + tc + gc;
+col_max = W - tc - gc;
+
+if row_min > row_max || col_min > col_max
+    error('Guard + training band too large for tile size %dx%d', H, W);
+end
+
+% Enumerate all valid CUT positions on a regular grid.
+[ccol, rrow] = meshgrid(col_min:col_max, row_min:row_max);
+cutidx = [rrow(:).'; ccol(:).'];
+n_cuts = size(cutidx, 2);
+
+fprintf('CFAR evaluator: tile size %dx%d, %d CUT cells per tile\n', H, W, n_cuts);
+
+% ------------------------------------------------------------------
+% Create CFAR detector and run on entire 3D array at once
 % ------------------------------------------------------------------
 cfar2d = phased.CFARDetector2D( ...
     'Method', 'CA', ...
@@ -145,77 +187,56 @@ cfar2d = phased.CFARDetector2D( ...
     'OutputFormat', 'CUT result', ...
     'ThresholdOutputPort', false);
 
+fprintf('CFAR evaluator: running CFAR on %d tiles (vectorized)...\n', n_images);
+
+t_start = tic;
+% cfar2d on M-by-N-by-P array returns D-by-P logical matrix
+y_all = cfar2d(s_power_3d, cutidx);  % n_cuts x n_images
+inference_time = toc(t_start);
+
+fprintf('CFAR evaluator: CFAR complete in %.2f seconds\n', inference_time);
+
+% ------------------------------------------------------------------
+% Scatter detections into 3D mask array (vectorized)
+% ------------------------------------------------------------------
+% Convert 2D CUT subscripts to linear indices (same for all tiles)
+cut_lin_idx = sub2ind([H, W], cutidx(1, :), cutidx(2, :));  % 1 x n_cuts
+
+% Preallocate 3D detection mask
+det_masks_3d = false(H, W, n_images);
+
+% Scatter all detections at once using linear indexing
+% For each tile k, we set det_masks_3d(cut_lin_idx, k) = y_all(:, k)
+for k = 1:n_images
+    det_masks_3d(cut_lin_idx + (k-1)*H*W) = y_all(:, k);
+end
+
+% ------------------------------------------------------------------
+% Evaluate each tile (coverage metrics require per-tile GT boxes)
+% ------------------------------------------------------------------
 total_tp = 0;
 total_fp = 0;
 total_fn = 0;
 total_gt = 0;
 total_pred = 0;
 
-inference_time = 0.0;
-
-fprintf('CFAR evaluator: processing %d tiles...\n', n_images);
+fprintf('CFAR evaluator: evaluating %d tiles...\n', n_images);
 
 for k = 1:n_images
     if mod(k, log_every) == 0 || k == 1 || k == n_images
-        fprintf('  CFAR evaluator: tile %d / %d (%.1f%%%%)\n', ...
+        fprintf('  Evaluating: tile %d / %d (%.1f%%%%)\n', ...
             k, n_images, 100 * k / n_images);
     end
 
-    tile_id = strtrim(test_ids(k));
-    tile_id = char(tile_id);
+    det_mask = det_masks_3d(:, :, k);
 
-    % Convert STFT tile from dB to linear power for CFAR.
-    % s_db: H x W, where H=fft_size (frequency bins), W=frames_per_image.
-    s_db = tiles_map(tile_id);
-    s_db = double(s_db);
-    s_power = 10.^(s_db / 10.0);
-
-    % CFAR operates only on valid CUT (cell under test) locations.
-    % We build cutidx to include all interior pixels whose full
-    % training+guard window lies completely inside the tile. Pixels
-    % near the borders are never tested and remain 0 in det_mask.
-    [H, W] = size(s_power);
-    gr = cfg.GuardBandSize(1); gc = cfg.GuardBandSize(2);
-    tr = cfg.TrainingBandSize(1); tc = cfg.TrainingBandSize(2);
-
-    row_min = 1 + tr + gr;
-    row_max = H - tr - gr;
-    col_min = 1 + tc + gc;
-    col_max = W - tc - gc;
-
-    if row_min > row_max || col_min > col_max
-        % Window too big for this tile; skip detections
-        det_mask = false(H, W);
-        tile_time = 0;
-    else
-        % Enumerate all valid CUT positions on a regular grid.
-        % rrow, ccol are HxW grids of row/col indices restricted
-        % to the interior, then reshaped into a 2 x D index matrix.
-        [ccol, rrow] = meshgrid(col_min:col_max, row_min:row_max);
-        cutidx = [rrow(:).'; ccol(:).'];
-
-        % Run CA-CFAR on all CUT cells in one shot. The output y
-        % is a logical-valued vector (0/1) of length D indicating
-        % whether each CUT exceeded the adaptive threshold.
-        t_start = tic;
-        y = cfar2d(s_power, cutidx);  % y is 1xD or Dx1
-        tile_time = toc(t_start);
-
-        % Scatter the D-element detection vector back into an HxW
-        % binary mask, marking only the tested CUT positions.
-        det_mask = false(H, W);
-        det_mask(sub2ind([H, W], cutidx(1, :), cutidx(2, :))) = logical(y(:)).';
-    end
-
-    inference_time = inference_time + tile_time;
-
-    % Optionally prune very small detection blobs which are likely
-    % to be noise speckles rather than real bursts.
+    % Optionally prune very small detection blobs
     if cfg.MinArea > 1
         det_mask = bwareaopen(det_mask, round(cfg.MinArea));
     end
 
     % Get GT boxes for this tile
+    tile_id = char(strtrim(test_ids(k)));
     gt_boxes = boxes_map(tile_id);
 
     % Evaluate using pixel-coverage approach
