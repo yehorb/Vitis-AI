@@ -1,5 +1,6 @@
 set -ex
 
+KRIA="${KRIA:-kria.local}"
 T_DIR="${T_DIR:-/home/petalinux/models/yolox_tiny/}"
 Q_DIR="${Q_DIR:-build/var/yolox_tiny_stft_quantized}"
 
@@ -12,5 +13,5 @@ ssh petalinux@kria.local "mkdir -p ${T_DIR}"
 scp -O "${Q_DIR}/target/kv260.xmodel" \
     src/edge/inference.py \
     "${STFT_DATASET}/meta.json" \
-    "${Q_DIR}/*.npy" \
-    "petalinux@kria.local:${T_DIR}"
+    "${Q_DIR}/"*.npy \
+    "petalinux@${KRIA}:${T_DIR}"
