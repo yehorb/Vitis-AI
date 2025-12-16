@@ -19,6 +19,20 @@ if t.TYPE_CHECKING:
     from stft_dataset.loader import StftDataLoader
 
 
+def postprocess(
+    model: torch.nn.Module, is_parallel: bool, outputs: torch.Tensor
+) -> torch.Tensor:
+    import os
+
+    if os.environ.get("W_QUANT", "0") == "1":
+        if is_parallel:
+            return model.module.head.postprocess(outputs)
+        else:
+            return model.head.postprocess(outputs)
+
+    return outputs
+
+
 @dataclasses.dataclass
 class EvaluatorParams:
     model: torch.nn.Module
@@ -42,8 +56,7 @@ class EvaluatorParams:
         return (0, 0, None), params
 
     def postprocess(self, is_parallel: bool, outputs: torch.Tensor) -> torch.Tensor:
-        del is_parallel  # unused
-        return outputs
+        return postprocess(self.model, is_parallel, outputs)
 
 
 @dataclasses.dataclass
@@ -74,10 +87,7 @@ class QEvaluatorParams:
         return (0, 0, None), ""
 
     def postprocess(self, is_parallel: bool, outputs: torch.Tensor) -> torch.Tensor:
-        if is_parallel:
-            return self.float_model.module.head.postprocess(outputs)
-        else:
-            return self.float_model.head.postprocess(outputs)
+        return postprocess(self.float_model, is_parallel, outputs)
 
 
 class StftEvaluator:
