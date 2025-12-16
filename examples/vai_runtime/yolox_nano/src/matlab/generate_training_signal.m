@@ -55,9 +55,17 @@ cfg.noise_power_db = -80;  % mean noise power in dB
 rngs.freq_min = -4.5e6; rngs.freq_max = 4.5e6;
 rngs.snr_min = args.SnrMin; rngs.snr_max = args.SnrMax;
 
+% можуть бути імпульси радарів - може бути що завгодно
+% тренуємось детектувати імпульси радарів
+% посилання на документ з параметрами
 rngs.pw_min  = 20e-6;  rngs.pw_max  = 120e-6;
+% більш характерно для радарів
 rngs.per_min = 150e-6; rngs.per_max = 400e-6;
+% теж може бути радар - посилатись на документ
 rngs.bw_min  = 0.1e6;  rngs.bw_max  = 2e6;
+% згідно з регуляторним документом ITU-R
+% для "широких" смуг необхідні значні ресурси для обчислення
+% десятки MHz це стандартна відправна точка для дослідження
 
 % explicit overlap policy
 overlap.enable = true;
@@ -99,8 +107,12 @@ t0 = 0; pulse_idx = 0;
 num_it_log = cfg.how_often_to_log_signal;
 
 while t0 < (cfg.total_duration - rngs.pw_min)
+    % частоти в смузі миттєвого огляду залежать від центральної частоти
     f0  = rngs.freq_min + (rngs.freq_max - rngs.freq_min)*rand;
     snr_db = rngs.snr_min + (rngs.snr_max - rngs.snr_min)*rand;
+    % qpsk parameters - конкретні значення залежать від джерела сигналу
+    % це є технічним завданням на детектор
+    % параметри обрані під задачу
     pw  = rngs.pw_min + (rngs.pw_max - rngs.pw_min)*rand;
     per = rngs.per_min + (rngs.per_max - rngs.per_min)*rand;
     B   = rngs.bw_min + (rngs.bw_max - rngs.bw_min)*rand;

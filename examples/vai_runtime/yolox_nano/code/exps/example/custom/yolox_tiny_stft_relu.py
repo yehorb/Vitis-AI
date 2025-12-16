@@ -230,6 +230,7 @@ class Exp(MyExp):
             confthre=self.test_conf,
             nmsthre=self.nmsthre,
             num_classes=self.num_classes,
+            iou_thre=0.8,
         )
         return evaluator
 
