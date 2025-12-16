@@ -233,7 +233,8 @@ import argparse
 import json
 import time
 from dataclasses import dataclass
-from typing import List, Optional, Tuple, Iterable
+from functools import wraps
+from typing import List, Optional, Tuple
 
 import numpy as np
 import numpy.typing as npt
@@ -241,7 +242,6 @@ import numpy.typing as npt
 # Vitis AI Runtime imports (available on KV260)
 import vart
 import xir
-
 
 # =============================================================================
 # Configuration
@@ -758,7 +758,7 @@ class YoloxInference:
             List of (box, score) detections
         """
         # Preprocess
-        input_tensor = preprocess_spectrogram(
+        input_tensor = timing(preprocess_spectrogram)(
             spectrogram,
             self.vmin_db,
             self.vmax_db,
@@ -766,10 +766,10 @@ class YoloxInference:
         )
 
         # Run DPU inference
-        outputs = self.runner.run(input_tensor)
+        outputs = timing(self.runner.run)(input_tensor)
 
         # Postprocess
-        detections = postprocess(outputs, self.config)
+        detections = timing(postprocess)(outputs, self.config)
 
         return detections
 
@@ -968,6 +968,19 @@ def main():
 
         if args.plot:
             visualize_predictions(spectrogram, detections, vmin_db, vmax_db)
+
+
+def timing(f):
+    @wraps(f)
+    def wrap(*args, **kw):
+        ts = time.perf_counter()
+        result = f(*args, **kw)
+        te = time.perf_counter()
+        elapsed = (te - ts) * 1000
+        print("func:%r took: %2.4f ms" % (f.__name__, elapsed))
+        return result
+
+    return wrap
 
 
 if __name__ == "__main__":
