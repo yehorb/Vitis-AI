@@ -3,8 +3,8 @@ clear; close all;
 %% ------------------------------------------------------------------------
 %  Paths
 % -------------------------------------------------------------------------
-imgDir = "dataset20251105_153340/images/train";   % folder with spectrogram PNGs
-lblDir = "dataset20251105_153340/labels/train";   % folder with YOLO .txt annotations
+imgDir = "../../data/stft/20251207_162413/images_tiles";   % folder with spectrogram PNGs
+lblDir = "../../data/stft/20251207_162413/ann_tiles";   % folder with YOLO .txt annotations
 outDir = "cfar_results";                          % output folder for images with BBs
 
 if ~isfolder(imgDir)
@@ -146,46 +146,17 @@ for idx = 1:numel(imgFiles)
     %  Read YOLO GT labels and build GT boxes in pixels (bboxesGT)
     % -------------------------------------------------------------
     [~, baseName, ~] = fileparts(imgName);
-    lblPath = fullfile(lblDir, baseName + ".txt");
-
-    bboxesGT = zeros(0,4);  % [x y w h]
+    lblPath = fullfile(lblDir, baseName + ".json");
 
     if isfile(lblPath)
-        fid = fopen(lblPath, 'r');
-        gtList = [];
-        while true
-            line = fgetl(fid);
-            if ~ischar(line), break; end
-            if isempty(strtrim(line)), continue; end
-
-            vals = sscanf(line, '%f');
-            if numel(vals) < 5
-                continue;
-            end
-            % YOLO: class xc yc w h (normalized 0..1)
-            xc = vals(2); yc = vals(3);
-            bw = vals(4); bh = vals(5);
-
-            boxW = bw * W;
-            boxH = bh * H;
-            xCenter = xc * W;
-            yCenter = yc * H;
-
-            x0 = xCenter - boxW/2;
-            y0 = yCenter - boxH/2;
-
-            % Convert to integer pixel coordinates
-            x1 = max(1, floor(x0) + 1);
-            y1 = max(1, floor(y0) + 1);
-            x2 = min(W, ceil(x0 + boxW));
-            y2 = min(H, ceil(y0 + boxH));
-
-            if x2 >= x1 && y2 >= y1
-                gtList = [gtList; x1, y1, (x2-x1+1), (y2-y1+1)];
-            end
+        lbl = jsondecode(fileread(lblPath));
+        numBoxes = length(lbl.annotations);
+        bboxesGT = zeros(numBoxes, 4);
+        for k = 1:numBoxes
+            bboxesGT(k, :) = lbl.annotations(k).bbox;
         end
-        fclose(fid);
-        bboxesGT = gtList;
+    else
+        bboxesGT = zeros(0,4);  % [x1 y1 x2 y2]
     end
 
     numGT  = size(bboxesGT,  1);
@@ -312,9 +283,13 @@ if totalGT == 0
     warning('No GT objects found in dataset. Pd/Pfd undefined.');
     Pd_obj  = NaN;
     Pfd_obj = NaN;
+    [prec, rec, f1] = NaN;
 else
     Pd_obj  = totalTP / totalGT;
     Pfd_obj = totalFP / totalGT;
+    prec = totalTP / (totalTP + totalFP);
+    rec = totalTP / (totalTP + totalFN);
+    f1 = 2 * prec * rec / (prec + rec);
 end
 
 fprintf('\n=== CFAR object-level performance over dataset ===\n');
