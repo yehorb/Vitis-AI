@@ -43,6 +43,7 @@ addParameter(p, 'VmaxDb', -20, @(x) isnumeric(x) && isscalar(x));
 addParameter(p, 'Split', 'val', @(x) ischar(x) || isstring(x));
 addParameter(p, 'NumSamples', 5, @(x) isnumeric(x) && isscalar(x) && x >= 0);
 addParameter(p, 'RandomSamples', true);
+addParameter(p, 'PowerRecovery', 20, @(x) isnumeric(x) && isscalar(x) && x >= 0);
 addParameter(p, 'OutDir', 'cfar_results', @(x) ischar(x) || isstring(x));
 parse(p, dataset_root, varargin{:});
 
@@ -139,6 +140,7 @@ totalFN = 0;  % number of missed GT objects; FN = False Negative
 % Must match dataset generator
 vmin_db = p.Results.VminDb;
 vmax_db = p.Results.VmaxDb;
+power = p.Results.PowerRecovery;
 clamp = @(M) min(max(M,vmin_db),vmax_db);
 
 %% ------------------------------------------------------------------------
@@ -151,7 +153,7 @@ for idx = 1:n_images
     %  Load spectrogram (already in dB) and convert to linear power
     % -------------------------------------------------------------
     SdB  = double(tiles_cell{idx});  % H x W, dB (single → double)
-    Slin = 10.^(SdB/20);             % H x W, linear power
+    Slin = 10.^(SdB/power);          % H x W, linear power
 
     [H, W] = size(Slin);
 
