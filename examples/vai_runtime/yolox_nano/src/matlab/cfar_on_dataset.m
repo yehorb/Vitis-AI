@@ -43,6 +43,7 @@ addParameter(p, 'VmaxDb', -20, @(x) isnumeric(x) && isscalar(x));
 addParameter(p, 'Split', 'val', @(x) ischar(x) || isstring(x));
 addParameter(p, 'NumSamples', 5, @(x) isnumeric(x) && isscalar(x) && x >= 0);
 addParameter(p, 'RandomSamples', true);
+addParameter(p, 'TileIds', []);
 addParameter(p, 'PowerRecovery', 20, @(x) isnumeric(x) && isscalar(x) && x >= 0);
 addParameter(p, 'OutDir', 'cfar_results', @(x) ischar(x) || isstring(x));
 parse(p, dataset_root, varargin{:});
@@ -70,7 +71,12 @@ if ~isfolder(outDir)
     mkdir(outDir);
 end
 
-tile_ids = stft_h5_helpers.read_id_list(split_path);
+if isempty(cfg.TileIds)
+    tile_ids = stft_h5_helpers.read_id_list(split_path);
+else
+    tile_ids = cfg.TileIds;
+    nSamples = 0;
+end
 if nSamples > 0
     if rSamples
         tile_ids = randsample(tile_ids, nSamples);
