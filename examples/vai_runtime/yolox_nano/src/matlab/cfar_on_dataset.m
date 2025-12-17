@@ -38,6 +38,8 @@ addParameter(p, 'RankFrac', 0.6, @(x) isnumeric(x) && isscalar(x) && x > 0 && x 
 addParameter(p, 'CloseKernel', [3 3], @(x) isnumeric(x) && numel(x) == 2);
 addParameter(p, 'RoiMinArea', 2, @(x) isnumeric(x) && isscalar(x) && x >= 1);
 addParameter(p, 'EdgeTol', 5, @(x) isnumeric(x) && isscalar(x) && x >= 0);
+addParameter(p, 'VminDb', -90, @(x) isnumeric(x) && isscalar(x));
+addParameter(p, 'VmaxDb', -20, @(x) isnumeric(x) && isscalar(x));
 addParameter(p, 'Split', 'val', @(x) ischar(x) || isstring(x));
 addParameter(p, 'NumSamples', 5, @(x) isnumeric(x) && isscalar(x) && x >= 0);
 addParameter(p, 'RandomSamples', true);
@@ -134,6 +136,11 @@ totalTP = 0;  % number of correctly detected GT objects; TP = True Positive
 totalFP = 0;  % number of extra CFAR detections; FP = False Positive
 totalFN = 0;  % number of missed GT objects; FN = False Negative
 
+% Must match dataset generator
+vmin_db = p.Results.VminDb;
+vmax_db = p.Results.VmaxDb;
+clamp = @(M) min(max(M,vmin_db),vmax_db);
+
 %% ------------------------------------------------------------------------
 %  Process each tile
 % -------------------------------------------------------------------------
@@ -179,7 +186,7 @@ for idx = 1:n_images
     freqBins = 1:H;
 
     fig = figure('Visible','off');
-    imagesc(timeBins, freqBins, SdB);
+    imagesc(timeBins, freqBins, clamp(SdB));
     axis xy;
     colormap parula; colorbar;
     title(sprintf('CFAR vs GT: %s', tile_id), 'Interpreter','none');
