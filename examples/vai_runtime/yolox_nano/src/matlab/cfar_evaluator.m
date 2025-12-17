@@ -72,7 +72,7 @@ end
 if ~isempty(cfg.TileIds)
     test_ids = cfg.TileIds;
 else
-    test_ids = read_id_list(test_list_path);
+    test_ids = stft_h5_helpers.read_id_list(test_list_path);
 end
 n_images = numel(test_ids);
 if n_images == 0
@@ -80,53 +80,10 @@ if n_images == 0
 end
 
 % ------------------------------------------------------------------
-% Preload all tiles and GT boxes into memory to avoid HDF5 overhead.
-%
-% tiles_map: maps tile_id (char) -> S_db tile (H x W, single).
-% boxes_map: maps tile_id (char) -> GT boxes (N x 4) in [x0,y0,w,h].
-% We use a single low-level HDF5 file handle for fast per-tile reads.
+% Preload all tiles and GT boxes into memory using shared helper
 % ------------------------------------------------------------------
-tiles_map = containers.Map('KeyType','char','ValueType','any');
-boxes_map = containers.Map('KeyType','char','ValueType','any');
-
-fprintf('CFAR evaluator: preloading %d tiles into memory...\n', n_images);
-preload_log_every = max(1, floor(n_images / 20));
-
-% Open HDF5 file once for faster per-tile reads
-h5_file_id = H5F.open(h5_path, 'H5F_ACC_RDONLY', 'H5P_DEFAULT');
-
-for k = 1:n_images
-    if mod(k, preload_log_every) == 0 || k == 1 || k == n_images
-        fprintf('  Preload: tile %d / %d (%.1f%%%%)\n', ...
-            k, n_images, 100 * k / n_images);
-    end
-
-    tile_id = strtrim(test_ids(k));
-    tile_id = char(tile_id);
-
-    % Load STFT tile (in dB) and store using low-level HDF5.
-    % h5_read_dataset returns the raw dataset stored at
-    %   group_path = '/S_db', dset_name = tile_id.
-    s_db = h5_read_dataset(h5_file_id, '/S_db', tile_id);
-    tiles_map(tile_id) = s_db;  % keep as single; convert to double later
-
-    % Load GT boxes for this tile. Not all tiles have /boxes/<id>,
-    % so use try/catch to avoid a global group scan. Missing dataset
-    % is treated as "no targets in this tile".
-    try
-        gt_boxes = h5_read_dataset(h5_file_id, '/boxes', tile_id);
-        gt_boxes = double(gt_boxes);
-        if size(gt_boxes, 2) ~= 4 && size(gt_boxes, 1) == 4
-            gt_boxes = gt_boxes.';
-        end
-    catch
-        % Missing dataset => no boxes
-        gt_boxes = zeros(0, 4);
-    end
-    boxes_map(tile_id) = gt_boxes;
-end
-
-H5F.close(h5_file_id);
+fprintf('CFAR evaluator: preloading tiles...\n');
+[tiles_cell, boxes_cell] = stft_h5_helpers.preload_dataset(h5_path, test_ids);
 
 fprintf('CFAR evaluator: preload done. Running CFAR on all tiles...\n');
 
@@ -135,8 +92,7 @@ fprintf('CFAR evaluator: preload done. Running CFAR on all tiles...\n');
 % Prepare data for parallel processing
 % ------------------------------------------------------------------
 % Get tile dimensions from first tile (assume all tiles are same size)
-first_id = char(strtrim(test_ids(1)));
-first_tile = tiles_map(first_id);
+first_tile = tiles_cell{1};
 [H, W] = size(first_tile);
 
 % Compute CUT indices once (same for all tiles)
@@ -160,18 +116,6 @@ n_cuts = size(cutidx, 2);
 cut_lin_idx = sub2ind([H, W], cutidx(1, :), cutidx(2, :));
 
 fprintf('CFAR evaluator: tile size %dx%d, %d CUT cells per tile\n', H, W, n_cuts);
-
-% Convert Map to cell arrays for parfor slicing
-tiles_cell = cell(n_images, 1);
-boxes_cell = cell(n_images, 1);
-for k = 1:n_images
-    tile_id = char(strtrim(test_ids(k)));
-    tiles_cell{k} = double(tiles_map(tile_id));
-    boxes_cell{k} = boxes_map(tile_id);
-end
-
-% Clear maps to free memory
-clear tiles_map boxes_map;
 
 % ------------------------------------------------------------------
 % Run CFAR + evaluation in parallel using parfor
@@ -271,32 +215,6 @@ summary = sprintf([ ...
     ], total_gt, total_pred, total_tp, total_fp, total_fn, precision, recall, f1, avg_time_ms);
 
 fprintf('%s\n', summary);
-end
-
-
-function data = h5_read_dataset(file_id, group_path, dset_name)
-% Read a dataset from an open HDF5 file using low-level API.
-% Mirrors the h5_write_dataset helper used in generate_training_signal.m
-
-group_id = H5G.open(file_id, group_path);
-dset_id  = H5D.open(group_id, dset_name);
-
-data = H5D.read(dset_id, 'H5ML_DEFAULT', 'H5S_ALL', 'H5S_ALL', 'H5P_DEFAULT');
-
-H5D.close(dset_id);
-H5G.close(group_id);
-end
-
-
-function ids = read_id_list(path)
-txt = fileread(path);
-if isempty(txt)
-    ids = strings(0, 1);
-else
-    parts = regexp(txt, '\r?\n', 'split');
-    parts = parts(~cellfun('isempty', parts));
-    ids = string(parts(:));
-end
 end
 
 
