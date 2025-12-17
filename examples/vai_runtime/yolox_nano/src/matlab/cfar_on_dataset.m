@@ -141,7 +141,6 @@ totalFN = 0;  % number of missed GT objects; FN = False Negative
 vmin_db = p.Results.VminDb;
 vmax_db = p.Results.VmaxDb;
 power = p.Results.PowerRecovery;
-clamp = @(M) min(max(M,vmin_db),vmax_db);
 
 %% ------------------------------------------------------------------------
 %  Process each tile
@@ -188,7 +187,7 @@ for idx = 1:n_images
     freqBins = 1:H;
 
     fig = figure('Visible','off');
-    imagesc(timeBins, freqBins, clamp(SdB));
+    imagesc(timeBins, freqBins, SdB, [vmin_db vmax_db]);
     axis xy;
     colormap parula; colorbar;
     title(sprintf('CFAR vs GT: %s', tile_id), 'Interpreter','none');
