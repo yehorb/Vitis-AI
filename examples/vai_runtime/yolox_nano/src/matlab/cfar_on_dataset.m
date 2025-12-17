@@ -203,7 +203,7 @@ for idx = 1:numel(imgFiles)
             bboxesGT(k, :) = lbl.annotations(k).bbox;
         end
     else
-        bboxesGT = zeros(0,4);  % [x1 y1 x2 y2]
+        bboxesGT = zeros(0,4);
     end
 
     numGT  = size(bboxesGT,  1);
@@ -214,73 +214,7 @@ for idx = 1:numel(imgFiles)
     %% ------------------------------------------------------------
     %  Object-level matching: CFAR boxes vs GT boxes with edgeTol
     % -------------------------------------------------------------
-    % For each GT box we try to find ONE matching CFAR box such that
-    %   |left_det - left_gt|   <= edgeTol
-    %   |right_det - right_gt| <= edgeTol
-    %   |top_det - top_gt|     <= edgeTol
-    %   |bottom_det - bot_gt|  <= edgeTol
-
-    gtMatched  = false(numGT,1);
-    detMatched = false(numDet,1);
-
-    TP_img = 0;
-    FN_img = 0;
-    FP_img = 0;
-
-    % Precompute GT edges
-    if numGT > 0
-        xg = bboxesGT(:,1);
-        yg = bboxesGT(:,2);
-        wg = bboxesGT(:,3);
-        hg = bboxesGT(:,4);
-
-        left_g   = xg;
-        top_g    = yg;
-        right_g  = xg + wg - 1;
-        bottom_g = yg + hg - 1;
-    else
-        left_g = []; top_g = []; right_g = []; bottom_g = [];
-    end
-
-    % Precompute CFAR edges
-    if numDet > 0
-        xd = bboxesCFAR(:,1);
-        yd = bboxesCFAR(:,2);
-        wd = bboxesCFAR(:,3);
-        hd = bboxesCFAR(:,4);
-
-        left_d   = xd;
-        top_d    = yd;
-        right_d  = xd + wd - 1;
-        bottom_d = yd + hd - 1;
-    else
-        left_d = []; top_d = []; right_d = []; bottom_d = [];
-    end
-
-    for g = 1:numGT
-        matchIdx = 0;
-        for d = 1:numDet
-            if detMatched(d)
-                continue;
-            end
-            if abs(left_d(d)   - left_g(g))   <= edgeTol && ...
-               abs(right_d(d)  - right_g(g))  <= edgeTol && ...
-               abs(top_d(d)    - top_g(g))    <= edgeTol && ...
-               abs(bottom_d(d) - bottom_g(g)) <= edgeTol
-                matchIdx = d;
-                break;
-            end
-        end
-        if matchIdx > 0
-            gtMatched(g)  = true;
-            detMatched(matchIdx) = true;
-            TP_img = TP_img + 1;
-        else
-            FN_img = FN_img + 1;
-        end
-    end
-
-    FP_img = sum(~detMatched);
+    [TP_img, FP_img, FN_img] = match_boxes_edge_tol(bboxesCFAR, bboxesGT, edgeTol);
 
     totalTP = totalTP + TP_img;
     totalFN = totalFN + FN_img;
@@ -357,4 +291,79 @@ summary = sprintf([ ...
 
 fprintf('\n%s', summary);
 
+end
+
+
+function [tp, fp, fn] = match_boxes_edge_tol(pred_boxes, gt_boxes, edge_tol)
+%% MATCH_BOXES_EDGE_TOL Match predicted boxes to GT boxes using edge tolerance.
+%
+% A prediction matches a GT box if ALL four edges are within edge_tol:
+%     |left_pred - left_gt|     <= edge_tol
+%     |right_pred - right_gt|   <= edge_tol
+%     |top_pred - top_gt|       <= edge_tol
+%     |bottom_pred - bottom_gt| <= edge_tol
+%
+% Each GT box can match at most one prediction (greedy, first-match).
+% Each prediction can match at most one GT box.
+%
+% Inputs:
+%     pred_boxes - N x 4 predicted boxes as [x0, y0, w, h]
+%     gt_boxes   - M x 4 ground truth boxes as [x0, y0, w, h]
+%     edge_tol   - Maximum allowed difference for each edge (pixels)
+%
+% Outputs:
+%     tp - Number of true positives (matched GT boxes)
+%     fp - Number of false positives (unmatched predictions)
+%     fn - Number of false negatives (unmatched GT boxes)
+
+num_gt  = size(gt_boxes, 1);
+num_det = size(pred_boxes, 1);
+
+% Edge cases
+if num_det == 0 && num_gt == 0
+    tp = 0; fp = 0; fn = 0;
+    return;
+elseif num_det == 0
+    tp = 0; fp = 0; fn = num_gt;
+    return;
+elseif num_gt == 0
+    tp = 0; fp = num_det; fn = 0;
+    return;
+end
+
+% Precompute GT edges
+left_g   = gt_boxes(:, 1);
+top_g    = gt_boxes(:, 2);
+right_g  = gt_boxes(:, 1) + gt_boxes(:, 3) - 1;
+bottom_g = gt_boxes(:, 2) + gt_boxes(:, 4) - 1;
+
+% Precompute prediction edges
+left_d   = pred_boxes(:, 1);
+top_d    = pred_boxes(:, 2);
+right_d  = pred_boxes(:, 1) + pred_boxes(:, 3) - 1;
+bottom_d = pred_boxes(:, 2) + pred_boxes(:, 4) - 1;
+
+% Greedy matching: for each GT, find first unmatched prediction within tolerance
+gt_matched  = false(num_gt, 1);
+det_matched = false(num_det, 1);
+
+for g = 1:num_gt
+    for d = 1:num_det
+        if det_matched(d)
+            continue;
+        end
+        if abs(left_d(d)   - left_g(g))   <= edge_tol && ...
+           abs(right_d(d)  - right_g(g))  <= edge_tol && ...
+           abs(top_d(d)    - top_g(g))    <= edge_tol && ...
+           abs(bottom_d(d) - bottom_g(g)) <= edge_tol
+            gt_matched(g) = true;
+            det_matched(d) = true;
+            break;
+        end
+    end
+end
+
+tp = sum(gt_matched);
+fn = num_gt - tp;
+fp = sum(~det_matched);
 end
