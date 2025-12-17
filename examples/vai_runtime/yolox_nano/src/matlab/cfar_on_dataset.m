@@ -253,16 +253,16 @@ for idx = 1:numel(imgFiles)
     xlabel('Time bins'); ylabel('Frequency bins');
     hold on;
 
-    % CFAR boxes (red)
-    for i = 1:size(bboxesCFAR,1)
-        rectangle('Position', bboxesCFAR(i,:), ...
-            'EdgeColor','r', 'LineWidth', 1.5);
-    end
-
     % GT boxes (green)
     for i = 1:size(bboxesGT,1)
         rectangle('Position', bboxesGT(i,:), ...
             'EdgeColor','g', 'LineWidth', 1.2);
+    end
+
+    % CFAR boxes (red)
+    for i = 1:size(bboxesCFAR,1)
+        rectangle('Position', bboxesCFAR(i,:), ...
+            'EdgeColor','r', 'LineWidth', 1.5);
     end
 
     hold off;
