@@ -67,9 +67,6 @@ if ~isfolder(outDir)
     mkdir(outDir);
 end
 
-fprintf('OS-CFAR evaluator: preloading %d tiles...\n', n_images);
-[tiles_cell, boxes_cell] = stft_h5_helpers.preload_dataset(h5_path, tile_ids);
-
 tile_ids = stft_h5_helpers.read_id_list(split_path);
 if nSamples > 0
     if rSamples
@@ -82,6 +79,9 @@ n_images = numel(tile_ids);
 if n_images == 0
     error('Split file is empty: %s', split_path);
 end
+
+fprintf('OS-CFAR evaluator: preloading %d tiles...\n', n_images);
+[tiles_cell, boxes_cell] = stft_h5_helpers.preload_dataset(h5_path, tile_ids);
 
 %% ------------------------------------------------------------------------
 %  1D OS-CFAR configuration (per column, along rows = frequency bins)
