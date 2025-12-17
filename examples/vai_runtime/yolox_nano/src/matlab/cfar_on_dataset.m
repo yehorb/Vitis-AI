@@ -38,34 +38,50 @@ addParameter(p, 'RankFrac', 0.6, @(x) isnumeric(x) && isscalar(x) && x > 0 && x 
 addParameter(p, 'CloseKernel', [3 3], @(x) isnumeric(x) && numel(x) == 2);
 addParameter(p, 'RoiMinArea', 2, @(x) isnumeric(x) && isscalar(x) && x >= 1);
 addParameter(p, 'EdgeTol', 5, @(x) isnumeric(x) && isscalar(x) && x >= 0);
-addParameter(p, 'VminDb', -90, @(x) isnumeric(x) && isscalar(x));
-addParameter(p, 'VmaxDb', -20, @(x) isnumeric(x) && isscalar(x));
+addParameter(p, 'Split', 'val', @(x) ischar(x) || isstring(x));
+addParameter(p, 'NumSamples', 5, @(x) isnumeric(x) && isscalar(x) && x >= 0);
+addParameter(p, 'RandomSamples', true);
 addParameter(p, 'OutDir', 'cfar_results', @(x) ischar(x) || isstring(x));
 parse(p, dataset_root, varargin{:});
 
 % Extract to local variables (keep original names for minimal changes below)
 dataset_root = char(p.Results.dataset_root);
+split        = char(p.Results.Split);
+nSamples     = p.Results.NumSamples;
+rSamples     = p.Results.RandomSamples;
 outDir       = char(p.Results.OutDir);
 
 %% ------------------------------------------------------------------------
-%  Paths
+%  Paths and validation
 % -------------------------------------------------------------------------
-imgDir = fullfile(dataset_root, 'images_tiles');
-lblDir = fullfile(dataset_root, 'ann_tiles');
+h5_path = fullfile(dataset_root, 'tensors', 'tiles.h5');
+split_path = fullfile(dataset_root, 'splits', [split '.txt']);
 
-if ~isfolder(imgDir)
-    error('Image directory not found: %s', imgDir);
+if ~isfile(h5_path)
+    error('HDF5 file not found: %s', h5_path);
 end
-if ~isfolder(lblDir)
-    error('Label directory not found: %s', lblDir);
+if ~isfile(split_path)
+    error('Split file not found: %s', split_path);
 end
 if ~isfolder(outDir)
     mkdir(outDir);
 end
 
-% Must match dataset generator
-render.vmin_db = p.Results.VminDb;
-render.vmax_db = p.Results.VmaxDb;
+fprintf('OS-CFAR evaluator: preloading %d tiles...\n', n_images);
+[tiles_cell, boxes_cell] = stft_h5_helpers.preload_dataset(h5_path, tile_ids);
+
+tile_ids = stft_h5_helpers.read_id_list(split_path);
+if nSamples > 0
+    if rSamples
+        tile_ids = randsample(tile_ids, nSamples);
+    else
+        tile_ids = tile_ids(1:tile_ids+1);
+    end
+end
+n_images = numel(tile_ids);
+if n_images == 0
+    error('Split file is empty: %s', split_path);
+end
 
 %% ------------------------------------------------------------------------
 %  1D OS-CFAR configuration (per column, along rows = frequency bins)
@@ -119,27 +135,16 @@ totalFP = 0;  % number of extra CFAR detections; FP = False Positive
 totalFN = 0;  % number of missed GT objects; FN = False Negative
 
 %% ------------------------------------------------------------------------
-%  Enumerate images
+%  Process each tile
 % -------------------------------------------------------------------------
-imgFiles = dir(fullfile(imgDir, "*.png"));
-if isempty(imgFiles)
-    error('No PNG images found in %s', imgDir);
-end
-
-for idx = 1:numel(imgFiles)
-    imgName = imgFiles(idx).name;
-    imgPath = fullfile(imgDir, imgName);
+for idx = 1:n_images
+    tile_id = tile_ids(idx);
 
     %% ------------------------------------------------------------
-    %  Load spectrogram and convert uint16 → dB → linear power
+    %  Load spectrogram (already in dB) and convert to linear power
     % -------------------------------------------------------------
-    I16 = imread(imgPath);  % uint16, H x W
-
-    vmin = render.vmin_db;
-    vmax = render.vmax_db;
-
-    SdB = vmin + double(I16) * (vmax - vmin) / 65535;  % H x W, dB
-    Slin = 10.^(SdB/10);                               % H x W
+    SdB  = double(tiles_cell{idx});  % H x W, dB (single → double)
+    Slin = 10.^(SdB/20);             % H x W, linear power
 
     [H, W] = size(Slin);
 
@@ -149,24 +154,12 @@ for idx = 1:numel(imgFiles)
     bboxesCFAR = cfar_detect_boxes(cfar1d, Slin, padSize, closeKernel, roiMinArea);
 
     %% ------------------------------------------------------------
-    %  Read YOLO GT labels and build GT boxes in pixels (bboxesGT)
+    %  Get GT boxes (already in [x0, y0, w, h] format)
     % -------------------------------------------------------------
-    [~, baseName, ~] = fileparts(imgName);
-    lblPath = fullfile(lblDir, baseName + ".json");
-
-    if isfile(lblPath)
-        lbl = jsondecode(fileread(lblPath));
-        numBoxes = length(lbl.annotations);
-        bboxesGT = zeros(numBoxes, 4);
-        for k = 1:numBoxes
-            bboxesGT(k, :) = lbl.annotations(k).bbox;
-        end
-    else
-        bboxesGT = zeros(0,4);
-    end
+    bboxesGT = boxes_cell{idx};  % N x 4 double, or empty 0x4
 
     numGT  = size(bboxesGT,  1);
-    numDet = size(bboxesCFAR,1);
+    numDet = size(bboxesCFAR, 1);
 
     totalGT = totalGT + numGT;
 
@@ -189,31 +182,30 @@ for idx = 1:numel(imgFiles)
     imagesc(timeBins, freqBins, SdB);
     axis xy;
     colormap parula; colorbar;
-    title(sprintf('CFAR vs GT: %s', imgName), 'Interpreter','none');
+    title(sprintf('CFAR vs GT: %s', tile_id), 'Interpreter','none');
     xlabel('Time bins'); ylabel('Frequency bins');
     hold on;
 
     % GT boxes (green)
-    for i = 1:size(bboxesGT,1)
+    for i = 1:size(bboxesGT, 1)
         rectangle('Position', bboxesGT(i,:), ...
             'EdgeColor','g', 'LineWidth', 1.2);
     end
 
     % CFAR boxes (red)
-    for i = 1:size(bboxesCFAR,1)
+    for i = 1:size(bboxesCFAR, 1)
         rectangle('Position', bboxesCFAR(i,:), ...
             'EdgeColor','r', 'LineWidth', 1.5);
     end
 
     hold off;
 
-    [~, baseName, ~] = fileparts(imgName);
-    outPath = fullfile(outDir, baseName + "_cfar_obj.png");
-    exportgraphics(fig, outPath, 'Resolution',150);
+    outPath = fullfile(outDir, tile_id + "_cfar_obj.png");
+    exportgraphics(fig, outPath, 'Resolution', 150);
     close(fig);
 
     fprintf('Processed %3d/%3d: %s | GT=%d, TP=%d, FN=%d, FP=%d\n', ...
-        idx, numel(imgFiles), imgName, numGT, TP_img, FN_img, FP_img);
+        idx, n_images, tile_id, numGT, TP_img, FN_img, FP_img);
 end
 
 %% ------------------------------------------------------------------------
