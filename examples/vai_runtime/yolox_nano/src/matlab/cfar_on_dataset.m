@@ -3,9 +3,9 @@ clear; close all;
 %% ------------------------------------------------------------------------
 %  Paths
 % -------------------------------------------------------------------------
-imgDir = "../../data/stft/20251207_162413/images_tiles";   % folder with spectrogram PNGs
-lblDir = "../../data/stft/20251207_162413/ann_tiles";   % folder with YOLO .txt annotations
-outDir = "cfar_results";                          % output folder for images with BBs
+imgDir = "../../data/stft/20251207_162413/images_tiles";  % folder with spectrogram PNGs
+lblDir = "../../data/stft/20251207_162413/ann_tiles";     % folder with YOLO .txt annotations
+outDir = "cfar_results";                                  % output folder for images with BBs
 
 if ~isfolder(imgDir)
     error('Image directory not found: %s', imgDir);
@@ -24,9 +24,9 @@ render.vmax_db = -20;
 %% ------------------------------------------------------------------------
 %  1D OS-CFAR configuration (per column, along rows = frequency bins)
 % -------------------------------------------------------------------------
-guardPerSide = 10;     % guard cells on each side of CUT
-trainPerSide = 40;     % training cells on each side of CUT
-pfa          = 1e-5;   % desired probability of false alarm
+guardPerSide = 10;    % guard cells on each side of CUT
+trainPerSide = 40;    % training cells on each side of CUT
+pfa          = 1e-5;  % desired probability of false alarm
 
 % OS-CFAR rank as fraction of training cells (0..1) (~0.6–0.8 typical)
 rankFrac     = 0.6;
@@ -62,15 +62,15 @@ fprintf('OS-CFAR config: trainPerSide=%d, guardPerSide=%d, rank=%d (%.0f%%), Pfa
 %% ------------------------------------------------------------------------
 %  CFAR padding (block padding)
 % -------------------------------------------------------------------------
-padSize = trainPerSide + guardPerSide;   % cells to pad on each side
+padSize = trainPerSide + guardPerSide;  % cells to pad on each side
 
 %% ------------------------------------------------------------------------
 %  Object-level stats: TP / FP / FN over all images
 % -------------------------------------------------------------------------
-totalGT = 0;   % total number of GT objects (signals); GT = Ground Truth
-totalTP = 0;   % number of correctly detected GT objects; TP = True Positive
-totalFP = 0;   % number of extra CFAR detections; FP = False Positive
-totalFN = 0;   % number of missed GT objects; FN = False Negative
+totalGT = 0;  % total number of GT objects (signals); GT = Ground Truth
+totalTP = 0;  % number of correctly detected GT objects; TP = True Positive
+totalFP = 0;  % number of extra CFAR detections; FP = False Positive
+totalFN = 0;  % number of missed GT objects; FN = False Negative
 
 %% ------------------------------------------------------------------------
 %  Enumerate images
@@ -87,29 +87,29 @@ for idx = 1:numel(imgFiles)
     %% ------------------------------------------------------------
     %  Load spectrogram and convert uint16 → dB → linear power
     % -------------------------------------------------------------
-    I16 = imread(imgPath);               % uint16, H x W
+    I16 = imread(imgPath);  % uint16, H x W
 
     vmin = render.vmin_db;
     vmax = render.vmax_db;
 
-    SdB = vmin + double(I16) * (vmax - vmin) / 65535;   % H x W, dB
-    Slin = 10.^(SdB/10);                                % H x W
+    SdB = vmin + double(I16) * (vmax - vmin) / 65535;  % H x W, dB
+    Slin = 10.^(SdB/10);                               % H x W
 
     [H, W] = size(Slin);
 
     %% ------------------------------------------------------------
     %  Vectorized OS-CFAR with block padding (along frequency)
     % -------------------------------------------------------------
-    topPad    = Slin(1:padSize,        :);          % padSize x W
-    bottomPad = Slin(end-padSize+1:end, :);         % padSize x W
+    topPad    = Slin(1:padSize, :);          % padSize x W
+    bottomPad = Slin(end-padSize+1:end, :);  % padSize x W
 
-    SlinPad = [topPad; Slin; bottomPad];                % (H + 2*padSize) x W
+    SlinPad = [topPad; Slin; bottomPad];  % (H + 2*padSize) x W
     CUTIdxPadded = (1:H) + padSize;
 
-    [detSub, thrSub] = cfar1d(SlinPad, CUTIdxPadded);   % each H x W
+    [detSub, thrSub] = cfar1d(SlinPad, CUTIdxPadded);  % each H x W
 
-    detMask      = logical(detSub);                     % H x W
-    thrLinMatrix = thrSub;                              % H x W (power)
+    detMask      = logical(detSub);  % H x W
+    thrLinMatrix = thrSub;           % H x W (power)
 
     %% ------------------------------------------------------------
     %  Morphology → CFAR ROI mask + CFAR boxes (bboxesCFAR)
@@ -128,7 +128,7 @@ for idx = 1:numel(imgFiles)
     if isempty(statsCFAR)
         bboxesCFAR = zeros(0,4);
     else
-        bb = vertcat(statsCFAR.BoundingBox);           % N x 4
+        bb = vertcat(statsCFAR.BoundingBox);  % N x 4
         x0 = floor(bb(:,1));
         y0 = floor(bb(:,2));
         w  = ceil(bb(:,3));
@@ -139,7 +139,7 @@ for idx = 1:numel(imgFiles)
         w  = max(1, min(W - x0, w));
         h  = max(1, min(H - y0, h));
 
-        bboxesCFAR = [x0, y0, w, h];                  % [x y w h]
+        bboxesCFAR = [x0, y0, w, h];  % [x y w h]
     end
 
     %% ------------------------------------------------------------
