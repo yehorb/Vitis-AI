@@ -283,13 +283,15 @@ if totalGT == 0
     warning('No GT objects found in dataset. Pd/Pfd undefined.');
     Pd_obj  = NaN;
     Pfd_obj = NaN;
-    [prec, rec, f1] = NaN;
+    precision = NaN;
+    recall = NaN;
+    f1 = NaN;
 else
     Pd_obj  = totalTP / totalGT;
     Pfd_obj = totalFP / totalGT;
-    prec = totalTP / (totalTP + totalFP);
-    rec = totalTP / (totalTP + totalFN);
-    f1 = 2 * prec * rec / (prec + rec);
+    precision = totalTP / (totalTP + totalFP);
+    recall = totalTP / (totalTP + totalFN);
+    f1 = 2 * precision * recall / (precision + recall);
 end
 
 fprintf('\n=== CFAR object-level performance over dataset ===\n');
@@ -299,3 +301,5 @@ fprintf('Total FN (missed) : %d\n', totalFN);
 fprintf('Total FP (extra)  : %d\n', totalFP);
 fprintf('Pd_object  = TP / GT  = %.6f\n', Pd_obj);
 fprintf('Pfd_object = FP / GT  = %.6f\n', Pfd_obj);
+fprintf('precision | recall | f1');
+fprintf('%4.2f | %4.2f | %4.2f', precision, recall, f1);
