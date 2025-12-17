@@ -1,11 +1,58 @@
-clear; close all;
+function [recall, precision, f1, summary] = cfar_on_dataset(dataset_root, varargin)
+%CFAR_ON_DATASET Evaluate 1D OS-CFAR detector on STFT tiles.
+%
+%   This evaluator runs a column-wise 1D OS-CFAR detector on STFT tiles
+%   stored as PNG images with JSON annotations.
+%
+%   Uses edge-tolerance box matching: a detection matches a GT box if all
+%   four edges (left, right, top, bottom) are within EdgeTol pixels.
+%
+%   [recall, precision, f1, summary] = cfar_on_dataset(dataset_root)
+%   [recall, precision, f1, summary] = cfar_on_dataset(dataset_root, Name, Value, ...)
+%
+%   Required argument:
+%       dataset_root - Path to dataset folder containing:
+%                      - images_tiles/  (PNG spectrograms)
+%                      - ann_tiles/     (JSON annotations)
+%
+%   Optional name-value pairs:
+%       'GuardPerSide'    - Guard cells on each side of CUT (default 10)
+%       'TrainPerSide'    - Training cells on each side of CUT (default 40)
+%       'Pfa'             - Probability of false alarm (default 1e-5)
+%       'RankFrac'        - OS-CFAR rank as fraction of training cells (default 0.6)
+%       'CloseKernel'     - Morphological closing kernel [rows cols] (default [3 3])
+%       'RoiMinArea'      - Minimum ROI area in pixels (default 2)
+%       'EdgeTol'         - Edge tolerance for box matching in pixels (default 5)
+%       'VminDb'          - Min dB value for uint16->dB conversion (default -90)
+%       'VmaxDb'          - Max dB value for uint16->dB conversion (default -20)
+%       'OutDir'          - Output directory for visualizations (default 'cfar_results')
+
+%% ------------------------------------------------------------------------
+%  Parse inputs
+% -------------------------------------------------------------------------
+p = inputParser;
+addRequired(p, 'dataset_root', @(x) ischar(x) || isstring(x));
+addParameter(p, 'GuardPerSide', 10, @(x) isnumeric(x) && isscalar(x) && x >= 0);
+addParameter(p, 'TrainPerSide', 40, @(x) isnumeric(x) && isscalar(x) && x >= 1);
+addParameter(p, 'Pfa', 1e-5, @(x) isnumeric(x) && isscalar(x) && x > 0);
+addParameter(p, 'RankFrac', 0.6, @(x) isnumeric(x) && isscalar(x) && x > 0 && x <= 1);
+addParameter(p, 'CloseKernel', [3 3], @(x) isnumeric(x) && numel(x) == 2);
+addParameter(p, 'RoiMinArea', 2, @(x) isnumeric(x) && isscalar(x) && x >= 1);
+addParameter(p, 'EdgeTol', 5, @(x) isnumeric(x) && isscalar(x) && x >= 0);
+addParameter(p, 'VminDb', -90, @(x) isnumeric(x) && isscalar(x));
+addParameter(p, 'VmaxDb', -20, @(x) isnumeric(x) && isscalar(x));
+addParameter(p, 'OutDir', 'cfar_results', @(x) ischar(x) || isstring(x));
+parse(p, dataset_root, varargin{:});
+
+% Extract to local variables (keep original names for minimal changes below)
+dataset_root = char(p.Results.dataset_root);
+outDir       = char(p.Results.OutDir);
 
 %% ------------------------------------------------------------------------
 %  Paths
 % -------------------------------------------------------------------------
-imgDir = "../../data/stft/20251207_162413/images_tiles";  % folder with spectrogram PNGs
-lblDir = "../../data/stft/20251207_162413/ann_tiles";     % folder with YOLO .txt annotations
-outDir = "cfar_results";                                  % output folder for images with BBs
+imgDir = fullfile(dataset_root, 'images_tiles');
+lblDir = fullfile(dataset_root, 'ann_tiles');
 
 if ~isfolder(imgDir)
     error('Image directory not found: %s', imgDir);
@@ -18,25 +65,25 @@ if ~isfolder(outDir)
 end
 
 % Must match dataset generator
-render.vmin_db = -90;
-render.vmax_db = -20;
+render.vmin_db = p.Results.VminDb;
+render.vmax_db = p.Results.VmaxDb;
 
 %% ------------------------------------------------------------------------
 %  1D OS-CFAR configuration (per column, along rows = frequency bins)
 % -------------------------------------------------------------------------
-guardPerSide = 10;    % guard cells on each side of CUT
-trainPerSide = 40;    % training cells on each side of CUT
-pfa          = 1e-5;  % desired probability of false alarm
+guardPerSide = p.Results.GuardPerSide;  % guard cells on each side of CUT
+trainPerSide = p.Results.TrainPerSide;  % training cells on each side of CUT
+pfa          = p.Results.Pfa;           % desired probability of false alarm
 
 % OS-CFAR rank as fraction of training cells (0..1) (~0.6–0.8 typical)
-rankFrac     = 0.6;
+rankFrac = p.Results.RankFrac;
 
 % Morphology / ROI extraction (for CFAR boxes)
-closeKernel  = [3 3];  % morphological closing kernel (rows x cols)
-roiMinArea   = 2;      % min ROI area in pixels (set 1 to disable)
+closeKernel = p.Results.CloseKernel;  % morphological closing kernel (rows x cols)
+roiMinArea  = p.Results.RoiMinArea;   % min ROI area in pixels (set 1 to disable)
 
 % Object-level matching tolerance (in bins/pixels)
-edgeTol = 5;           % max allowed diff for each box edge (left/right/top/bottom)
+edgeTol = p.Results.EdgeTol;  % max allowed diff for each box edge (left/right/top/bottom)
 
 %% ------------------------------------------------------------------------
 %  Configure OS-CFAR detector (1D)
@@ -294,12 +341,20 @@ else
     f1 = 2 * precision * recall / (precision + recall);
 end
 
-fprintf('\n=== CFAR object-level performance over dataset ===\n');
-fprintf('Total GT objects  : %d\n', totalGT);
-fprintf('Total TP (matched): %d\n', totalTP);
-fprintf('Total FN (missed) : %d\n', totalFN);
-fprintf('Total FP (extra)  : %d\n', totalFP);
-fprintf('Pd_object  = TP / GT  = %.6f\n', Pd_obj);
-fprintf('Pfd_object = FP / GT  = %.6f\n', Pfd_obj);
-fprintf('precision | recall | f1');
-fprintf('%4.2f | %4.2f | %4.2f', precision, recall, f1);
+summary = sprintf([ ...
+    'CFAR Object-Level Results (1D OS-CFAR)\n', ...
+    '--------------------------------------\n', ...
+    'Total GT objects  : %d\n', ...
+    'Total TP (matched): %d\n', ...
+    'Total FN (missed) : %d\n', ...
+    'Total FP (extra)  : %d\n', ...
+    'Pd_object  = TP/GT = %.4f\n', ...
+    'Pfd_object = FP/GT = %.4f\n', ...
+    'Precision: %.4f\n', ...
+    'Recall:    %.4f\n', ...
+    'F1 Score:  %.4f\n' ...
+    ], totalGT, totalTP, totalFN, totalFP, Pd_obj, Pfd_obj, precision, recall, f1);
+
+fprintf('\n%s', summary);
+
+end
