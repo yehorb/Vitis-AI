@@ -147,47 +147,7 @@ for idx = 1:numel(imgFiles)
     %% ------------------------------------------------------------
     %  Vectorized OS-CFAR with block padding (along frequency)
     % -------------------------------------------------------------
-    topPad    = Slin(1:padSize, :);          % padSize x W
-    bottomPad = Slin(end-padSize+1:end, :);  % padSize x W
-
-    SlinPad = [topPad; Slin; bottomPad];  % (H + 2*padSize) x W
-    CUTIdxPadded = (1:H) + padSize;
-
-    [detSub, thrSub] = cfar1d(SlinPad, CUTIdxPadded);  % each H x W
-
-    detMask      = logical(detSub);  % H x W
-    thrLinMatrix = thrSub;           % H x W (power)
-
-    %% ------------------------------------------------------------
-    %  Morphology → CFAR ROI mask + CFAR boxes (bboxesCFAR)
-    % -------------------------------------------------------------
-    detMaskClean = imclose(detMask, strel('rectangle', closeKernel));
-    detMaskClean = imfill(detMaskClean, 'holes');
-
-    if roiMinArea > 1
-        detMaskForRoi = bwareaopen(detMaskClean, roiMinArea);
-    else
-        detMaskForRoi = detMaskClean;
-    end
-
-    statsCFAR = regionprops(detMaskForRoi, 'BoundingBox');
-
-    if isempty(statsCFAR)
-        bboxesCFAR = zeros(0,4);
-    else
-        bb = vertcat(statsCFAR.BoundingBox);  % N x 4
-        x0 = floor(bb(:,1));
-        y0 = floor(bb(:,2));
-        w  = ceil(bb(:,3));
-        h  = ceil(bb(:,4));
-
-        x0 = max(0, min(W-1, x0));
-        y0 = max(0, min(H-1, y0));
-        w  = max(1, min(W - x0, w));
-        h  = max(1, min(H - y0, h));
-
-        bboxesCFAR = [x0, y0, w, h];  % [x y w h]
-    end
+    bboxesCFAR = cfar_detect_boxes(cfar1d, Slin, padSize, closeKernel, roiMinArea);
 
     %% ------------------------------------------------------------
     %  Read YOLO GT labels and build GT boxes in pixels (bboxesGT)
@@ -291,6 +251,67 @@ summary = sprintf([ ...
 
 fprintf('\n%s', summary);
 
+end
+
+
+function boxes = cfar_detect_boxes(cfar_det, Slin, pad_size, close_kernel, min_area)
+%% CFAR_DETECT_BOXES Run 1D CFAR on spectrogram and extract bounding boxes.
+%
+% Applies column-wise 1D CFAR with block padding, then morphological
+% cleanup, and extracts bounding boxes from connected components.
+%
+% Inputs:
+%     cfar_det     - Configured phased.CFARDetector object (1D)
+%     Slin         - H x W linear power spectrogram
+%     pad_size     - Number of rows to pad on top/bottom (block padding)
+%     close_kernel - [rows cols] for morphological closing
+%     min_area     - Minimum blob area in pixels (blobs smaller are removed)
+%
+% Outputs:
+%     boxes - N x 4 bounding boxes as [x0, y0, w, h], 0-based coords
+
+[H, W] = size(Slin);
+
+% Block padding: replicate top/bottom rows to handle border cells
+top_pad    = Slin(1:pad_size, :);
+bottom_pad = Slin(end-pad_size+1:end, :);
+
+Slin_pad = [top_pad; Slin; bottom_pad];  % (H + 2*pad_size) x W
+cut_idx  = (1:H) + pad_size;
+
+% Run 1D CFAR along each column
+[det_sub, ~] = cfar_det(Slin_pad, cut_idx);  % H x W
+det_mask = logical(det_sub);
+
+% Morphological cleanup: close gaps and fill holes
+det_mask_clean = imclose(det_mask, strel('rectangle', close_kernel));
+det_mask_clean = imfill(det_mask_clean, 'holes');
+
+% Remove small blobs
+if min_area > 1
+    det_mask_clean = bwareaopen(det_mask_clean, min_area);
+end
+
+% Extract bounding boxes from connected components
+stats = regionprops(det_mask_clean, 'BoundingBox');
+
+if isempty(stats)
+    boxes = zeros(0, 4);
+else
+    bb = vertcat(stats.BoundingBox);  % N x 4, [x y w h] with 0.5 offsets
+    x0 = floor(bb(:, 1));
+    y0 = floor(bb(:, 2));
+    w  = ceil(bb(:, 3));
+    h  = ceil(bb(:, 4));
+
+    % Clamp to image bounds
+    x0 = max(0, min(W-1, x0));
+    y0 = max(0, min(H-1, y0));
+    w  = max(1, min(W - x0, w));
+    h  = max(1, min(H - y0, h));
+
+    boxes = [x0, y0, w, h];
+end
 end
 
 
