@@ -25,7 +25,9 @@ function [recall, precision, f1, summary] = cfar_on_dataset(dataset_root, vararg
 %     'EdgeTol'         - Edge tolerance for box matching in pixels (default 5)
 %     'Split'           - Which split file to use: 'val', 'test', 'train' (default 'val')
 %     'OutDir'          - Output directory for visualizations (default 'cfar_results')
-%     'SaveVisualizations' - Save annotated images (default false)
+%     'SaveVisualizations' - Save annotated images for all tiles (default false)
+%     'SaveTileIds'     - Specific tile IDs to save visualizations for (default [])
+%     'SaveEveryN'      - Save visualization every N tiles (0 = disabled, default 0)
 
 %% ------------------------------------------------------------------------
 %  Parse inputs
@@ -48,6 +50,8 @@ addParameter(p, 'TileIds', []);
 addParameter(p, 'PowerRecovery', 20, @(x) isnumeric(x) && isscalar(x) && x >= 0);
 addParameter(p, 'OutDir', 'cfar_results', @(x) ischar(x) || isstring(x));
 addParameter(p, 'SaveVisualizations', false, @(x) islogical(x) || x == 0 || x == 1);
+addParameter(p, 'SaveTileIds', [], @(x) isempty(x) || isstring(x) || iscellstr(x));
+addParameter(p, 'SaveEveryN', 0, @(x) isnumeric(x) && isscalar(x) && x >= 0);
 parse(p, dataset_root, varargin{:});
 
 % Extract to local variables (keep original names for minimal changes below)
@@ -57,6 +61,8 @@ nSamples     = p.Results.NumSamples;
 rSamples     = p.Results.RandomSamples;
 outDir       = char(p.Results.OutDir);
 saveVis      = logical(p.Results.SaveVisualizations);
+saveTileIds  = string(p.Results.SaveTileIds);  % convert to string array
+saveEveryN   = p.Results.SaveEveryN;
 
 %% ------------------------------------------------------------------------
 %  Paths and validation
@@ -70,7 +76,8 @@ end
 if ~isfile(split_path)
     error('Split file not found: %s', split_path);
 end
-if ~isfolder(outDir) && saveVis
+anySaveRequested = saveVis || ~isempty(saveTileIds) || saveEveryN > 0;
+if ~isfolder(outDir) && anySaveRequested
     mkdir(outDir);
 end
 
@@ -86,6 +93,9 @@ if nSamples > 0
     else
         tile_ids = tile_ids(1:nSamples);
     end
+end
+if ~isempty(saveTileIds)
+    tile_ids = [tile_ids; saveTileIds];
 end
 n_images = numel(tile_ids);
 if n_images == 0
@@ -201,7 +211,10 @@ parfor idx = 1:n_images
     %% ------------------------------------------------------------
     %  Save annotated image with CFAR & GT BBs (optional)
     % -------------------------------------------------------------
-    if saveVis
+    shouldSave = saveVis || ...
+                 ismember(tile_id, saveTileIds) || ...
+                 (saveEveryN > 0 && mod(idx, saveEveryN) == 0);
+    if shouldSave
         outPath = fullfile(outDir, tile_id + "_cfar_obj.png");
         save_cfar_visualization(SdB, bboxesGT, bboxesCFAR, tile_id, outPath, vmin_db, vmax_db);
     end
