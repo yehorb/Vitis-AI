@@ -141,6 +141,16 @@ power = p.Results.PowerRecovery;
 %  Process each tile (parallel)
 % -------------------------------------------------------------------------
 fprintf('Processing %d tiles in parallel...\n', n_images);
+q = parallel.pool.DataQueue;
+completed = 0;
+t_start = tic;
+function on_completed(~)
+    completed = completed + 1;
+    elapsed = toc(t_start);
+    avg = elapsed/completed;
+    fprintf('Completed %d/%d in %.2f (avg %.2f)\n', completed, n_images, elapsed, avg);
+end
+afterEach(q, @on_completed);
 
 parfor idx = 1:n_images
     tile_id = tile_ids(idx);
@@ -216,7 +226,12 @@ parfor idx = 1:n_images
     outPath = fullfile(outDir, tile_id + "_cfar_obj.png");
     exportgraphics(fig, outPath, 'Resolution', 150);
     close(fig);
+
+    % Mark tile as completed
+    send(q, idx);
 end
+
+elapsed = toc(t_start);
 
 %% ------------------------------------------------------------------------
 %  Aggregate results from all workers
@@ -228,6 +243,8 @@ totalFN = sum(fn_counts);
 
 fprintf('Completed %d tiles: GT=%d, TP=%d, FN=%d, FP=%d\n', ...
     n_images, totalGT, totalTP, totalFN, totalFP);
+fprintf('Processed %d tiles in %.2f s (%.2f tiles/s)\n', ...
+    n_images, elapsed, n_images / elapsed);
 
 %% ------------------------------------------------------------------------
 %  Final object-level Pd / Pfd results
