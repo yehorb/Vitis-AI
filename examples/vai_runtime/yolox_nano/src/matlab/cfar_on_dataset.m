@@ -71,17 +71,17 @@ if ~isfolder(outDir)
     mkdir(outDir);
 end
 
-if isempty(cfg.TileIds)
+if isempty(p.Results.TileIds)
     tile_ids = stft_h5_helpers.read_id_list(split_path);
 else
-    tile_ids = cfg.TileIds;
+    tile_ids = p.Results.TileIds;
     nSamples = 0;
 end
 if nSamples > 0
     if rSamples
         tile_ids = randsample(tile_ids, nSamples);
     else
-        tile_ids = tile_ids(1:tile_ids+1);
+        tile_ids = tile_ids(1:nSamples);
     end
 end
 n_images = numel(tile_ids);
