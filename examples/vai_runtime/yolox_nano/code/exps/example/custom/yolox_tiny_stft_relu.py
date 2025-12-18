@@ -50,7 +50,8 @@ class Exp(MyExp):
         self.h5_path = self.data_dir / "tensors" / "tiles.h5"
         self.meta_path = self.data_dir / "meta.json"
         self.train_split = self.data_dir / "splits" / "train.txt"
-        self.val_split = self.data_dir / "splits" / "val.txt"
+        val_split = os.environ.get("VAL_SPLIT", "val.txt")
+        self.val_split = self.data_dir / "splits" / val_split
 
         # ---------------- augmentation config ---------------- #
         # Disable augmentations - use specialized augs later
