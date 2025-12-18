@@ -25,6 +25,7 @@ function [recall, precision, f1, summary] = cfar_on_dataset(dataset_root, vararg
 %     'EdgeTol'         - Edge tolerance for box matching in pixels (default 5)
 %     'Split'           - Which split file to use: 'val', 'test', 'train' (default 'val')
 %     'OutDir'          - Output directory for visualizations (default 'cfar_results')
+%     'SaveVisualizations' - Save annotated images (default false)
 
 %% ------------------------------------------------------------------------
 %  Parse inputs
@@ -46,6 +47,7 @@ addParameter(p, 'RandomSamples', true);
 addParameter(p, 'TileIds', []);
 addParameter(p, 'PowerRecovery', 20, @(x) isnumeric(x) && isscalar(x) && x >= 0);
 addParameter(p, 'OutDir', 'cfar_results', @(x) ischar(x) || isstring(x));
+addParameter(p, 'SaveVisualizations', false, @(x) islogical(x) || x == 0 || x == 1);
 parse(p, dataset_root, varargin{:});
 
 % Extract to local variables (keep original names for minimal changes below)
@@ -54,6 +56,7 @@ split        = char(p.Results.Split);
 nSamples     = p.Results.NumSamples;
 rSamples     = p.Results.RandomSamples;
 outDir       = char(p.Results.OutDir);
+saveVis      = logical(p.Results.SaveVisualizations);
 
 %% ------------------------------------------------------------------------
 %  Paths and validation
@@ -67,7 +70,7 @@ end
 if ~isfile(split_path)
     error('Split file not found: %s', split_path);
 end
-if ~isfolder(outDir)
+if ~isfolder(outDir) && saveVis
     mkdir(outDir);
 end
 
@@ -196,36 +199,12 @@ parfor idx = 1:n_images
     fn_counts(idx) = FN_img;
 
     %% ------------------------------------------------------------
-    %  Save annotated image with CFAR & GT BBs
+    %  Save annotated image with CFAR & GT BBs (optional)
     % -------------------------------------------------------------
-    timeBins = 1:W;
-    freqBins = 1:H;
-
-    fig = figure('Visible','off');
-    imagesc(timeBins, freqBins, SdB, [vmin_db vmax_db]);
-    axis xy;
-    colormap parula; colorbar;
-    title(sprintf('CFAR vs GT: %s', tile_id), 'Interpreter','none');
-    xlabel('Time bins'); ylabel('Frequency bins');
-    hold on;
-
-    % GT boxes (green)
-    for i = 1:size(bboxesGT, 1)
-        rectangle('Position', bboxesGT(i,:), ...
-            'EdgeColor','g', 'LineWidth', 1.2);
+    if saveVis
+        outPath = fullfile(outDir, tile_id + "_cfar_obj.png");
+        save_cfar_visualization(SdB, bboxesGT, bboxesCFAR, tile_id, outPath, vmin_db, vmax_db);
     end
-
-    % CFAR boxes (red)
-    for i = 1:size(bboxesCFAR, 1)
-        rectangle('Position', bboxesCFAR(i,:), ...
-            'EdgeColor','r', 'LineWidth', 1.5);
-    end
-
-    hold off;
-
-    outPath = fullfile(outDir, tile_id + "_cfar_obj.png");
-    exportgraphics(fig, outPath, 'Resolution', 150);
-    close(fig);
 
     % Mark tile as completed
     send(q, idx);
@@ -416,4 +395,43 @@ end
 tp = sum(gt_matched);
 fn = num_gt - tp;
 fp = sum(~det_matched);
+end
+
+
+function save_cfar_visualization(SdB, bboxesGT, bboxesCFAR, tile_id, outPath, vmin_db, vmax_db)
+%% SAVE_CFAR_VISUALIZATION Save annotated spectrogram with GT and CFAR boxes.
+%
+% Inputs:
+%     SdB       - H x W spectrogram in dB
+%     bboxesGT  - N x 4 ground truth boxes [x0, y0, w, h]
+%     bboxesCFAR - M x 4 CFAR detection boxes [x0, y0, w, h]
+%     tile_id   - Tile identifier string (for title)
+%     outPath   - Output file path
+%     vmin_db   - Colormap minimum (dB)
+%     vmax_db   - Colormap maximum (dB)
+
+[H, W] = size(SdB);
+
+fig = figure('Visible', 'off');
+imagesc(1:W, 1:H, SdB, [vmin_db vmax_db]);
+axis xy;
+colormap parula; colorbar;
+title(sprintf('CFAR vs GT: %s', tile_id), 'Interpreter', 'none');
+xlabel('Time bins'); ylabel('Frequency bins');
+hold on;
+
+% GT boxes (green)
+for i = 1:size(bboxesGT, 1)
+    rectangle('Position', bboxesGT(i,:), 'EdgeColor', 'g', 'LineWidth', 1.2);
+end
+
+% CFAR boxes (red)
+for i = 1:size(bboxesCFAR, 1)
+    rectangle('Position', bboxesCFAR(i,:), 'EdgeColor', 'r', 'LineWidth', 1.5);
+end
+
+hold off;
+
+exportgraphics(fig, outPath, 'Resolution', 150);
+close(fig);
 end
