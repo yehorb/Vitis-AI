@@ -116,17 +116,6 @@ numTrainingCells = 2 * trainPerSide;
 numGuardCells    = 2 * guardPerSide;
 
 rank = max(1, min(numTrainingCells, round(rankFrac * numTrainingCells)));
-
-cfar1d = phased.CFARDetector( ...
-    'Method',               'OS', ...
-    'NumTrainingCells',     numTrainingCells, ...
-    'NumGuardCells',        numGuardCells, ...
-    'ThresholdFactor',      'Auto', ...
-    'Rank',                 rank, ...
-    'ProbabilityFalseAlarm',pfa, ...
-    'OutputFormat',         'CUT result', ...
-    'ThresholdOutputPort',  true);
-
 fprintf('OS-CFAR config: trainPerSide=%d, guardPerSide=%d, rank=%d (%.0f%%), Pfa=%.1e\n', ...
     trainPerSide, guardPerSide, rank, 100*rank/numTrainingCells, pfa);
 
@@ -136,12 +125,12 @@ fprintf('OS-CFAR config: trainPerSide=%d, guardPerSide=%d, rank=%d (%.0f%%), Pfa
 padSize = trainPerSide + guardPerSide;  % cells to pad on each side
 
 %% ------------------------------------------------------------------------
-%  Object-level stats: TP / FP / FN over all images
+%  Object-level stats: TP / FP / FN over all images (per-tile arrays for parfor)
 % -------------------------------------------------------------------------
-totalGT = 0;  % total number of GT objects (signals); GT = Ground Truth
-totalTP = 0;  % number of correctly detected GT objects; TP = True Positive
-totalFP = 0;  % number of extra CFAR detections; FP = False Positive
-totalFN = 0;  % number of missed GT objects; FN = False Negative
+gt_counts = zeros(n_images, 1);  % GT objects per tile
+tp_counts = zeros(n_images, 1);  % true positives per tile
+fp_counts = zeros(n_images, 1);  % false positives per tile
+fn_counts = zeros(n_images, 1);  % false negatives per tile
 
 % Must match dataset generator
 vmin_db = p.Results.VminDb;
@@ -149,9 +138,11 @@ vmax_db = p.Results.VmaxDb;
 power = p.Results.PowerRecovery;
 
 %% ------------------------------------------------------------------------
-%  Process each tile
+%  Process each tile (parallel)
 % -------------------------------------------------------------------------
-for idx = 1:n_images
+fprintf('Processing %d tiles in parallel...\n', n_images);
+
+parfor idx = 1:n_images
     tile_id = tile_ids(idx);
 
     %% ------------------------------------------------------------
@@ -165,6 +156,15 @@ for idx = 1:n_images
     %% ------------------------------------------------------------
     %  Vectorized OS-CFAR with block padding (along frequency)
     % -------------------------------------------------------------
+    cfar1d = phased.CFARDetector( ...
+        'Method',               'OS', ...
+        'NumTrainingCells',     numTrainingCells, ...
+        'NumGuardCells',        numGuardCells, ...
+        'ThresholdFactor',      'Auto', ...
+        'Rank',                 rank, ...
+        'ProbabilityFalseAlarm',pfa, ...
+        'OutputFormat',         'CUT result', ...
+        'ThresholdOutputPort',  true);
     bboxesCFAR = cfar_detect_boxes(cfar1d, Slin, padSize, closeKernel, roiMinArea);
 
     %% ------------------------------------------------------------
@@ -172,19 +172,18 @@ for idx = 1:n_images
     % -------------------------------------------------------------
     bboxesGT = boxes_cell{idx};  % N x 4 double, or empty 0x4
 
-    numGT  = size(bboxesGT,  1);
-    numDet = size(bboxesCFAR, 1);
-
-    totalGT = totalGT + numGT;
+    numGT = size(bboxesGT, 1);
 
     %% ------------------------------------------------------------
     %  Object-level matching: CFAR boxes vs GT boxes with edgeTol
     % -------------------------------------------------------------
     [TP_img, FP_img, FN_img] = match_boxes_edge_tol(bboxesCFAR, bboxesGT, edgeTol);
 
-    totalTP = totalTP + TP_img;
-    totalFN = totalFN + FN_img;
-    totalFP = totalFP + FP_img;
+    % Store per-tile counts (reduction after parfor)
+    gt_counts(idx) = numGT;
+    tp_counts(idx) = TP_img;
+    fp_counts(idx) = FP_img;
+    fn_counts(idx) = FN_img;
 
     %% ------------------------------------------------------------
     %  Save annotated image with CFAR & GT BBs
@@ -217,10 +216,18 @@ for idx = 1:n_images
     outPath = fullfile(outDir, tile_id + "_cfar_obj.png");
     exportgraphics(fig, outPath, 'Resolution', 150);
     close(fig);
-
-    fprintf('Processed %3d/%3d: %s | GT=%d, TP=%d, FN=%d, FP=%d\n', ...
-        idx, n_images, tile_id, numGT, TP_img, FN_img, FP_img);
 end
+
+%% ------------------------------------------------------------------------
+%  Aggregate results from all workers
+% -------------------------------------------------------------------------
+totalGT = sum(gt_counts);
+totalTP = sum(tp_counts);
+totalFP = sum(fp_counts);
+totalFN = sum(fn_counts);
+
+fprintf('Completed %d tiles: GT=%d, TP=%d, FN=%d, FP=%d\n', ...
+    n_images, totalGT, totalTP, totalFN, totalFP);
 
 %% ------------------------------------------------------------------------
 %  Final object-level Pd / Pfd results
