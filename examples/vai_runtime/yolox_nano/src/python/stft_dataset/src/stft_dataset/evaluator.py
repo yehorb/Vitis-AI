@@ -260,15 +260,16 @@ class StftEvaluator:
         summary = (
             f"STFT Evaluation Results\n"
             f"-----------------------\n"
-            f"Total GT boxes:   {stats.gt}\n"
-            f"Total predictions:{stats.pred}\n"
-            f"TP: {stats.tp}, FP: {stats.fp}, FN: {stats.fn}\n"
-            f"Precision: {precision:.4f}\n"
-            f"Recall:    {recall:.4f}\n"
-            f"F1 Score:  {f1:.4f}\n"
-            f"Pd_object (TP/GT): {pd:.4f}\n"
-            f"Pfd_object (FP/GT): {pfd:.4f}\n"
-            f"Avg inference time: {avg_time_ms:.2f} ms/image\n"
+            f"GT        : {stats.gt}\n"
+            f"TP        : {stats.tp}\n"
+            f"FP        : {stats.fp}\n"
+            f"FN        : {stats.fn}\n"
+            f"Pd        : {pd:.4f}\n"
+            f"Pfd       : {pfd:.4f}\n"
+            f"Precision : {precision:.4f}\n"
+            f"Recall    : {recall:.4f}\n"
+            f"F1 Score  : {f1:.4f}\n"
+            f"Avg inference time : {avg_time_ms:.2f} ms/image\n"
         )
 
         logger.info(f"Eval: P={precision:.4f}, R={recall:.4f}, F1={f1:.4f}")
