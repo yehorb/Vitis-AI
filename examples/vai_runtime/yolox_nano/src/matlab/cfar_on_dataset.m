@@ -52,6 +52,7 @@ addParameter(p, 'OutDir', 'cfar_results', @(x) ischar(x) || isstring(x));
 addParameter(p, 'SaveVisualizations', false, @(x) islogical(x) || x == 0 || x == 1);
 addParameter(p, 'SaveTileIds', [], @(x) isempty(x) || isstring(x) || iscellstr(x));
 addParameter(p, 'SaveEveryN', 0, @(x) isnumeric(x) && isscalar(x) && x >= 0);
+addParameter(p, 'LogEveryN', 10, @(x) isnumeric(x) && isscalar(x) && x >= 0);
 parse(p, dataset_root, varargin{:});
 
 % Extract to local variables (keep original names for minimal changes below)
@@ -63,6 +64,7 @@ outDir       = char(p.Results.OutDir);
 saveVis      = logical(p.Results.SaveVisualizations);
 saveTileIds  = string(p.Results.SaveTileIds);  % convert to string array
 saveEveryN   = p.Results.SaveEveryN;
+logEveryN    = p.Results.LogEveryN;
 
 %% ------------------------------------------------------------------------
 %  Paths and validation
@@ -159,9 +161,11 @@ completed = 0;
 t_start = tic;
 function on_completed(~)
     completed = completed + 1;
-    elapsed = toc(t_start);
-    avg = elapsed/completed;
-    fprintf('Completed %d/%d in %.2f (avg %.2f)\n', completed, n_images, elapsed, avg);
+    if mod(completed, logEveryN) == 0
+        elapsed = toc(t_start);
+        avg = elapsed/completed;
+        fprintf('Completed %d/%d in %.2f (avg %.2f)\n', completed, n_images, elapsed, avg);
+    end
 end
 afterEach(q, @on_completed);
 
