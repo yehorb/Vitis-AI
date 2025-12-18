@@ -47,7 +47,7 @@ addParameter(p, 'Split', 'val', @(x) ischar(x) || isstring(x));
 addParameter(p, 'NumSamples', 5, @(x) isnumeric(x) && isscalar(x) && x >= 0);
 addParameter(p, 'RandomSamples', true);
 addParameter(p, 'TileIds', []);
-addParameter(p, 'PowerRecovery', 20, @(x) isnumeric(x) && isscalar(x) && x >= 0);
+addParameter(p, 'PowerRecovery', 10, @(x) isnumeric(x) && isscalar(x) && x >= 0);
 addParameter(p, 'OutDir', 'cfar_results', @(x) ischar(x) || isstring(x));
 addParameter(p, 'SaveVisualizations', false, @(x) islogical(x) || x == 0 || x == 1);
 addParameter(p, 'SaveTileIds', [], @(x) isempty(x) || isstring(x) || iscellstr(x));
