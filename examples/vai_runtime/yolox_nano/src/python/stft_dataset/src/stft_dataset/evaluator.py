@@ -252,6 +252,8 @@ class StftEvaluator:
         precision = stats.precision
         recall = stats.recall
         f1 = stats.f1
+        pd = stats.tp / stats.gt
+        pfd = stats.fp / stats.gt
 
         avg_time_ms = 1000 * inference_time / n_samples if n_samples > 0 else 0.0
 
@@ -264,6 +266,8 @@ class StftEvaluator:
             f"Precision: {precision:.4f}\n"
             f"Recall:    {recall:.4f}\n"
             f"F1 Score:  {f1:.4f}\n"
+            f"Pd_object (TP/GT): {pd:.4f}\n"
+            f"Pfd_object (FP/GT): {pfd:.4f}\n"
             f"Avg inference time: {avg_time_ms:.2f} ms/image\n"
         )
 
