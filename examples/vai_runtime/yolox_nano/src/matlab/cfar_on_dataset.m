@@ -28,6 +28,8 @@ function [recall, precision, f1, summary] = cfar_on_dataset(dataset_root, vararg
 %     'SaveVisualizations' - Save annotated images for all tiles (default false)
 %     'SaveTileIds'     - Specific tile IDs to save visualizations for (default [])
 %     'SaveEveryN'      - Save visualization every N tiles (0 = disabled, default 0)
+%     'MatchMethod'     - Box matching method: 'iou' or 'edge_tol' (default 'iou')
+%     'IoUThreshold'    - IoU threshold for matching (default 0.5, used if MatchMethod='iou')
 
 %% ------------------------------------------------------------------------
 %  Parse inputs
@@ -53,6 +55,8 @@ addParameter(p, 'SaveVisualizations', false, @(x) islogical(x) || x == 0 || x ==
 addParameter(p, 'SaveTileIds', [], @(x) isempty(x) || isstring(x) || iscellstr(x));
 addParameter(p, 'SaveEveryN', 0, @(x) isnumeric(x) && isscalar(x) && x >= 0);
 addParameter(p, 'LogEveryN', 10, @(x) isnumeric(x) && isscalar(x) && x >= 0);
+addParameter(p, 'MatchMethod', 'iou', @(x) ismember(x, {'iou', 'edge_tol'}));
+addParameter(p, 'IoUThreshold', 0.5, @(x) isnumeric(x) && isscalar(x) && x > 0 && x <= 1);
 parse(p, dataset_root, varargin{:});
 
 % Extract to local variables (keep original names for minimal changes below)
@@ -65,6 +69,8 @@ saveVis      = logical(p.Results.SaveVisualizations);
 saveTileIds  = string(p.Results.SaveTileIds);  % convert to string array
 saveEveryN   = p.Results.SaveEveryN;
 logEveryN    = p.Results.LogEveryN;
+matchMethod  = char(p.Results.MatchMethod);
+iouThreshold = p.Results.IoUThreshold;
 
 %% ------------------------------------------------------------------------
 %  Paths and validation
@@ -202,9 +208,13 @@ parfor idx = 1:n_images
     numGT = size(bboxesGT, 1);
 
     %% ------------------------------------------------------------
-    %  Object-level matching: CFAR boxes vs GT boxes with edgeTol
+    %  Object-level matching: CFAR boxes vs GT boxes
     % -------------------------------------------------------------
-    [TP_img, FP_img, FN_img] = match_boxes_edge_tol(bboxesCFAR, bboxesGT, edgeTol);
+    if strcmp(matchMethod, 'iou')
+        [TP_img, FP_img, FN_img] = match_boxes_iou(bboxesCFAR, bboxesGT, iouThreshold);
+    else
+        [TP_img, FP_img, FN_img] = match_boxes_edge_tol(bboxesCFAR, bboxesGT, edgeTol);
+    end
 
     % Store per-tile counts (reduction after parfor)
     gt_counts(idx) = numGT;
@@ -260,9 +270,17 @@ else
     f1 = 2 * precision * recall / (precision + recall);
 end
 
+% Build matching method description
+if strcmp(matchMethod, 'iou')
+    matchDesc = sprintf('IoU >= %.2f', iouThreshold);
+else
+    matchDesc = sprintf('EdgeTol = %d px', edgeTol);
+end
+
 summary = sprintf([ ...
     'CFAR Object-Level Results (1D OS-CFAR)\n', ...
     '--------------------------------------\n', ...
+    'Matching method   : %s\n', ...
     'Total GT objects  : %d\n', ...
     'Total TP (matched): %d\n', ...
     'Total FN (missed) : %d\n', ...
@@ -272,7 +290,7 @@ summary = sprintf([ ...
     'Precision: %.4f\n', ...
     'Recall:    %.4f\n', ...
     'F1 Score:  %.4f\n' ...
-    ], totalGT, totalTP, totalFN, totalFP, Pd_obj, Pfd_obj, precision, recall, f1);
+    ], matchDesc, totalGT, totalTP, totalFN, totalFP, Pd_obj, Pfd_obj, precision, recall, f1);
 
 fprintf('\n%s', summary);
 
@@ -451,4 +469,58 @@ hold off;
 
 exportgraphics(fig, outPath, 'Resolution', 150);
 close(fig);
+end
+
+
+function [tp, fp, fn] = match_boxes_iou(pred_boxes, gt_boxes, iou_thre)
+%% MATCH_BOXES_IOU Match predicted boxes to GT boxes using IoU threshold.
+%
+% Uses greedy matching: for each prediction, find best GT match by IoU.
+% A match is valid if IoU >= iou_thre and GT box not already matched.
+% This is consistent with the YOLO evaluation in evaluator.py.
+%
+% Inputs:
+%     pred_boxes - M x 4 predicted boxes as [x0, y0, w, h] (0-based coords)
+%     gt_boxes   - N x 4 ground truth boxes as [x0, y0, w, h] (0-based coords)
+%     iou_thre   - IoU threshold for valid match (e.g., 0.5)
+%
+% Outputs:
+%     tp - Number of true positives (matched predictions)
+%     fp - Number of false positives (unmatched predictions)
+%     fn - Number of false negatives (unmatched GT boxes)
+
+num_pred = size(pred_boxes, 1);
+num_gt   = size(gt_boxes, 1);
+
+% Edge cases
+if num_pred == 0 && num_gt == 0
+    tp = 0; fp = 0; fn = 0;
+    return;
+elseif num_pred == 0
+    tp = 0; fp = 0; fn = num_gt;
+    return;
+elseif num_gt == 0
+    tp = 0; fp = num_pred; fn = 0;
+    return;
+end
+
+% Compute IoU matrix [M x N] using MATLAB's built-in function
+% bboxOverlapRatio expects [x, y, w, h] format (which we already have)
+iou_matrix = bboxOverlapRatio(pred_boxes, gt_boxes, 'Union');
+
+% Greedy matching: for each prediction, find best unmatched GT
+gt_matched = false(num_gt, 1);
+tp = 0;
+
+for p = 1:num_pred
+    [best_iou, best_gt] = max(iou_matrix(p, :));
+
+    if best_iou >= iou_thre && ~gt_matched(best_gt)
+        tp = tp + 1;
+        gt_matched(best_gt) = true;
+    end
+end
+
+fp = num_pred - tp;
+fn = num_gt - sum(gt_matched);
 end
