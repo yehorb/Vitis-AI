@@ -52,14 +52,22 @@ def main() -> None:
         help="Specific tile ID to export (e.g., rec_20251207_162413_002)",
     )
 
-    parser.add_argument(
+    count_group = parser.add_mutually_exclusive_group(required=True)
+    count_group.add_argument(
         "--index",
         type=int,
         default=0,
         help="Index of tile to export when using --split (default: 0)",
     )
+    count_group.add_argument(
+        "--all",
+        action="store_true",
+        help="Export all tiles in the split when using --split",
+    )
+
     parser.add_argument(
-        "--output", "-o",
+        "--output",
+        "-o",
         type=Path,
         default=Path("test_spectrogram.npy"),
         help="Output .npy file path (default: test_spectrogram.npy)",
@@ -94,11 +102,21 @@ def main() -> None:
                 f"Index {index} out of range. Dataset has {len(dataset)} tiles."
             )
 
-    # Get the tile
-    img, labels, tile_id = dataset[index]
+    if not args.all:
+        # Get the tile
+        img, labels, tile_id = dataset[index]
 
-    # img shape is [1, H, W] from StftDataset, we want [H, W] for edge inference
-    spectrogram = img[0]  # Remove channel dimension
+        # img shape is [1, H, W] from StftDataset, we want [H, W] for edge inference
+        spectrogram = img[0]  # Remove channel dimension
+    else:
+        img, _, _ = dataset[0]
+        _, H, W = img.shape
+        num_tiles = len(dataset)
+        spectrogram = np.zeros((num_tiles, H, W), dtype=np.float32)
+        for i in range(num_tiles):
+            img, _, _ = dataset[i]
+            spectrogram[i, :] = img[0]
+        tile_id = "all"
 
     print(f"Tile ID: {tile_id}")
     print(f"Shape: {spectrogram.shape}")
@@ -110,7 +128,10 @@ def main() -> None:
     print(f"Saved spectrogram: {args.output}")
 
     # Optionally save labels
-    if args.with_labels:
+    if args.all:
+        print("--all is not compatible with --with-labels")
+        print("labels will not be saved")
+    if args.with_labels and not args.all:
         labels_path = args.output.with_name(args.output.stem + "_labels.npy")
         np.save(labels_path, labels)
         print(f"Saved labels: {labels_path}")
@@ -123,7 +144,9 @@ def main() -> None:
             # Convert back to x0, y0, x1, y1 for readability
             x0, y0 = cx - w / 2, cy - h / 2
             x1, y1 = cx + w / 2, cy + h / 2
-            print(f"  [{i}] class={int(cls_id)} box=[{x0:.1f}, {y0:.1f}, {x1:.1f}, {y1:.1f}]")
+            print(
+                f"  [{i}] class={int(cls_id)} box=[{x0:.1f}, {y0:.1f}, {x1:.1f}, {y1:.1f}]"
+            )
 
     # Show normalization info if meta.json provided
     if args.meta:
