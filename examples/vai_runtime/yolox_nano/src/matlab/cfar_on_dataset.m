@@ -229,8 +229,9 @@ parfor idx = 1:n_images
                  ismember(tile_id, saveTileIds) || ...
                  (saveEveryN > 0 && mod(idx, saveEveryN) == 0);
     if shouldSave
+        short_stats = sprintf("GT: %d | TP: %d | FP: %d | FN: %d", numGT, TP_img, FP_img, FN_img);
         outPath = fullfile(outDir, tile_id + "_cfar_obj.png");
-        save_cfar_visualization(SdB, bboxesGT, bboxesCFAR, tile_id, outPath, vmin_db, vmax_db);
+        save_cfar_visualization(SdB, bboxesGT, bboxesCFAR, tile_id, outPath, vmin_db, vmax_db, short_stats);
     end
 
     % Mark tile as completed
@@ -432,7 +433,7 @@ fp = sum(~det_matched);
 end
 
 
-function save_cfar_visualization(SdB, bboxesGT, bboxesCFAR, tile_id, outPath, vmin_db, vmax_db)
+function save_cfar_visualization(SdB, bboxesGT, bboxesCFAR, tile_id, outPath, vmin_db, vmax_db, short_stats)
 %% SAVE_CFAR_VISUALIZATION Save annotated spectrogram with GT and CFAR boxes.
 %
 % Inputs:
@@ -450,7 +451,7 @@ fig = figure('Visible', 'off');
 imagesc(1:W, 1:H, SdB, [vmin_db vmax_db]);
 axis xy;
 colormap parula; colorbar;
-title(sprintf('CFAR vs GT: %s', tile_id), 'Interpreter', 'none');
+title(sprintf('%s | %s', tile_id, short_stats), 'Interpreter', 'none');
 xlabel('Time bins'); ylabel('Frequency bins');
 hold on;
 
