@@ -379,7 +379,9 @@ class DpuRunner:
             np.empty(info.shape, dtype=np.int8, order="C") for info in self.output_info
         ]
 
-    def run(self, input_float: np.ndarray) -> List[np.ndarray]:
+    def run(
+        self, input_float: npt.NDArray[np.float32]
+    ) -> List[npt.NDArray[np.float32]]:
         """
         Execute inference on DPU.
 
@@ -416,11 +418,11 @@ class DpuRunner:
 
 
 def preprocess_spectrogram(
-    spectrogram: np.ndarray,
+    spectrogram: npt.NDArray[np.float32],
     vmin_db: float,
     vmax_db: float,
     target_shape: Tuple[int, int] = (128, 128),
-) -> np.ndarray:
+) -> npt.NDArray[np.float32]:
     """
     Preprocess STFT spectrogram for inference.
 
@@ -456,16 +458,16 @@ def preprocess_spectrogram(
 # =============================================================================
 
 
-def sigmoid(x: np.ndarray) -> np.ndarray:
+def sigmoid(x: npt.NDArray[np.float32]) -> npt.NDArray[np.float32]:
     """Numerically stable sigmoid."""
     return np.where(x >= 0, 1 / (1 + np.exp(-x)), np.exp(x) / (1 + np.exp(x)))
 
 
 def decode_single_head(
-    output: np.ndarray,
+    output: npt.NDArray[np.float32],
     stride: int,
     num_classes: int,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> Tuple[npt.NDArray[np.float32], npt.NDArray[np.float32]]:
     """
     Decode a single YOLOX detection head output.
 
@@ -542,9 +544,9 @@ def decode_single_head(
 
 
 def decode_yolox_outputs(
-    outputs: List[np.ndarray],
+    outputs: List[npt.NDArray[np.float32]],
     config: ModelConfig,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> Tuple[npt.NDArray[np.float32], npt.NDArray[np.float32]]:
     """
     Decode all YOLOX detection head outputs.
 
@@ -595,10 +597,10 @@ def decode_yolox_outputs(
 
 
 def nms(
-    boxes: np.ndarray,
-    scores: np.ndarray,
+    boxes: npt.NDArray[np.float32],
+    scores: npt.NDArray[np.float32],
     iou_threshold: float,
-) -> np.ndarray:
+) -> npt.NDArray[np.float32]:
     """
     Non-Maximum Suppression.
 
@@ -647,9 +649,9 @@ def nms(
 
 
 def postprocess(
-    outputs: List[np.ndarray],
+    outputs: List[npt.NDArray[np.float32]],
     config: ModelConfig,
-) -> List[Tuple[np.ndarray, float]]:
+) -> List[Tuple[npt.NDArray[np.float32], float]]:
     """
     Full postprocessing pipeline: decode, filter, NMS.
 
@@ -752,8 +754,10 @@ class YoloxInference:
             print(f"  Output[{i}]: shape={info.shape}, fix-point={info.fixpoint}")
 
     def detect(
-        self, spectrogram: np.ndarray, stats: t.Optional[TimingStats] = None
-    ) -> List[Tuple[np.ndarray, float]]:
+        self,
+        spectrogram: npt.NDArray[np.float32],
+        stats: t.Optional[TimingStats] = None,
+    ) -> List[Tuple[npt.NDArray[np.float32], float]]:
         """
         Run detection on a single spectrogram.
 
@@ -779,7 +783,9 @@ class YoloxInference:
 
         return detections
 
-    def benchmark(self, spectrogram: np.ndarray, iterations: int = 100) -> float:
+    def benchmark(
+        self, spectrogram: npt.NDArray[np.float32], iterations: int = 100
+    ) -> float:
         """
         Benchmark inference throughput.
 
