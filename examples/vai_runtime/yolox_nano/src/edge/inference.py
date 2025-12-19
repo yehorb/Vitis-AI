@@ -234,6 +234,7 @@ import json
 import time
 from dataclasses import dataclass
 from functools import wraps
+import typing as t
 from typing import List, Optional, Tuple
 
 import numpy as np
@@ -242,6 +243,9 @@ import numpy.typing as npt
 # Vitis AI Runtime imports (available on KV260)
 import vart
 import xir
+
+if t.TYPE_CHECKING:
+    TimingStats = t.Dict[str, t.List[float]]
 
 # =============================================================================
 # Configuration
@@ -747,7 +751,9 @@ class YoloxInference:
         for i, info in enumerate(self.runner.output_info):
             print(f"  Output[{i}]: shape={info.shape}, fix-point={info.fixpoint}")
 
-    def detect(self, spectrogram: np.ndarray) -> List[Tuple[np.ndarray, float]]:
+    def detect(
+        self, spectrogram: np.ndarray, stats: t.Optional[TimingStats] = None
+    ) -> List[Tuple[np.ndarray, float]]:
         """
         Run detection on a single spectrogram.
 
@@ -758,7 +764,7 @@ class YoloxInference:
             List of (box, score) detections
         """
         # Preprocess
-        input_tensor = timing(preprocess_spectrogram)(
+        input_tensor = timing(preprocess_spectrogram, stats)(
             spectrogram,
             self.vmin_db,
             self.vmax_db,
@@ -766,10 +772,10 @@ class YoloxInference:
         )
 
         # Run DPU inference
-        outputs = timing(self.runner.run)(input_tensor)
+        outputs = timing(self.runner.run, stats)(input_tensor)
 
         # Postprocess
-        detections = timing(postprocess)(outputs, self.config)
+        detections = timing(postprocess, stats)(outputs, self.config)
 
         return detections
 
@@ -780,18 +786,32 @@ class YoloxInference:
         Returns:
             Average inference time in milliseconds
         """
+        if len(spectrogram.shape) == 3:
+            n, _, _ = spectrogram.shape
+            iterations = n
+        else:
+            n = 1
+
         # Warmup
-        for _ in range(10):
-            self.detect(spectrogram)
+        for i in range(10):
+            idx = 0 if n == 1 else i % n
+            self.detect(spectrogram[idx])
+
+        stats: TimingStats = {}
 
         # Benchmark
         start = time.perf_counter()
-        for _ in range(iterations):
-            self.detect(spectrogram)
+        for i in range(iterations):
+            idx = 0 if n == 1 else i % n
+            self.detect(spectrogram[idx], stats)
         elapsed = time.perf_counter() - start
 
         avg_ms = (elapsed / iterations) * 1000
         print(f"Average inference time: {avg_ms:.2f} ms ({1000/avg_ms:.1f} FPS)")
+        for key, value in stats.items():
+            print(f"Function: {key}")
+            fun_avg_ms = np.mean(value)
+            print(f"Average runtime: {fun_avg_ms}")
         return avg_ms
 
 
@@ -890,6 +910,12 @@ def main():
         help="Path to input spectrogram (.npy file, shape 128x128)",
     )
     parser.add_argument(
+        "--not-flat",
+        "-N",
+        action="store_true",
+        help="Indicate that the input contains more than 1 spectrogram (shape is [N, H, W], not [1, H, W])",
+    )
+    parser.add_argument(
         "--meta",
         "-M",
         default=None,
@@ -970,14 +996,19 @@ def main():
             visualize_predictions(spectrogram, detections, vmin_db, vmax_db)
 
 
-def timing(f):
+def timing(f, stats: t.Optional[TimingStats] = None):
     @wraps(f)
     def wrap(*args, **kw):
         ts = time.perf_counter()
         result = f(*args, **kw)
         te = time.perf_counter()
         elapsed = (te - ts) * 1000
-        print("func:%r took: %2.4f ms" % (f.__name__, elapsed))
+        if stats is None:
+            print("func:%r took: %2.4f ms" % (f.__name__, elapsed))
+        else:
+            if f.__name__ not in stats:
+                stats[f.__name__] = []
+            stats[f.__name__].append(elapsed)
         return result
 
     return wrap
