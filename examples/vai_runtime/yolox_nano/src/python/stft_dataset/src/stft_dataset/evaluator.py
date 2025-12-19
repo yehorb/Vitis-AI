@@ -221,13 +221,13 @@ class StftEvaluator:
                 start = time.time()
                 # Default float model returns final bboxes [x1, y1, x2, y2, confidence] here
                 outputs = model(imgs_batch)
-                inference_time += time.time() - start
 
                 if params.should_dump_xmodel():
                     return params.exit_early(output_data)
 
                 # Quantization-aware model decodes individual head outputs into bboxes here
                 outputs = params.postprocess(is_parallel, outputs)
+                inference_time += time.time() - start
 
                 # Everything down from here is just post-processing
                 # Clone to avoid issues with in-place operations during postprocess
