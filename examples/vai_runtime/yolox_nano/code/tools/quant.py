@@ -113,6 +113,13 @@ def make_parser():
         help="speed test only.",
     )
     parser.add_argument(
+        "--verbose",
+        dest="verbose",
+        default=False,
+        action="store_true",
+        help="Print model info",
+    )
+    parser.add_argument(
         "opts",
         help="Modify config options using the command-line",
         default=None,
@@ -160,12 +167,13 @@ def main(exp, args, num_gpu):
         args.batch_size = 1
 
     model = exp.get_model()
-    logger.info(
-        "Model Summary: {}".format(
-            get_model_info(model, exp.test_size, getattr(exp, "input_channels", 3))
+    if args.verbose:
+        logger.info(
+            "Model Summary: {}".format(
+                get_model_info(model, exp.test_size, getattr(exp, "input_channels", 3))
+            )
         )
-    )
-    logger.info("Model Structure:\n{}".format(str(model)))
+        logger.info("Model Structure:\n{}".format(str(model)))
 
     evaluator = exp.get_evaluator(args.batch_size, is_distributed, args.test, args.legacy)
     evaluator.per_class_AP = True
@@ -207,6 +215,21 @@ def main(exp, args, num_gpu):
                 quantizer.fast_finetune(feed_model_with_data, (model, evaluator.dataloader.dataset, device, sample_num, fft_batch_size))
             elif args.quant_mode == 'test':
                 quantizer.load_ft_param()
+
+        if args.quant_mode == "inspect":
+            from pytorch_nndct.apis import Inspector
+
+            target = "DPUCZDX8G_ISA1_B4096"
+            inspector = Inspector(target)
+
+            input_channels = getattr(exp, "input_channels", 3)
+            dummy_input = torch.randn([1, input_channels, *exp.test_size]).to(device)
+
+            inspector.inspect(
+                float_model, dummy_input, output_dir=args.quant_dir, image_format="svg"
+            )
+
+            return 0
 
     # if is_distributed:
     #     model = DDP(model, device_ids=[rank])

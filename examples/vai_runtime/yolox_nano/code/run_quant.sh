@@ -22,6 +22,7 @@ BATCH=32
 CFG=code/exps/example/custom/yolox_tiny_stft_relu.py
 CKPT=YOLOX_outputs/yolox_tiny_stft_relu/best_ckpt.pth
 Q_DIR=build/var/yolox_tiny_stft_quantized
+INSPECT="${INSPECT:-0}"
 
 # NOTE: --conf and --nms only affect the evaluation metrics printed after quantization.
 # They do NOT affect the quantization calibration or the exported xmodel.
@@ -31,6 +32,12 @@ CONF=0.001
 NMS=0.001
 
 set -ex
+
+if [ "$INSPECT" = "1" ]; then
+    MODE='inspect'
+    python -m yolox.tools.quant -f ${CFG} -c ${CKPT} -b ${BATCH} -d ${GPU_NUM} --conf ${CONF} --nms ${NMS} --quant_mode ${MODE} --quant_dir ${Q_DIR}
+    exit $?
+fi
 
 MODE='calib'
 python -m yolox.tools.quant -f ${CFG} -c ${CKPT} -b ${BATCH} -d ${GPU_NUM} --conf ${CONF} --nms ${NMS} --quant_mode ${MODE} --quant_dir ${Q_DIR}
