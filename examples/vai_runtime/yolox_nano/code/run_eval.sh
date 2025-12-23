@@ -17,7 +17,7 @@ export CUDA_VISIBLE_DEVICES=0
 GPU_NUM=1
 
 export LD_LIBRARY_PATH=${PWD}/code:${LD_LIBRARY_PATH}
-BATCH=1024
+BATCH="${BATCH:-1024}"
 CFG=code/exps/example/custom/yolox_tiny_stft_relu.py
 CKPT=./YOLOX_outputs/yolox_tiny_stft_relu/best_ckpt.pth
 

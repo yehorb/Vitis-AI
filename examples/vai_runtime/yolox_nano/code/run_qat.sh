@@ -12,7 +12,7 @@ python -m yolox.tools.train -f ${CFG} -d ${GPU_NUM} -b ${BATCH} -o
 
 export CUDA_VISIBLE_DEVICES=0
 GPU_NUM=1
-BATCH=32
+BATCH="${BATCH:-32}"
 
 # WORKSPACE=YOLOX_outputs/yolox_nano_deploy_relu_qat # assign with this path if you QAT yourself instead of using the released QAT model
 WORKSPACE=qat

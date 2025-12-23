@@ -18,7 +18,7 @@ GPU_NUM=1
 export W_QUANT=1
 export CUDA_HOME=/usr/local/cuda
 
-BATCH=32
+BATCH="${BATCH:-32}"
 CFG=code/exps/example/custom/yolox_tiny_stft_relu.py
 CKPT=YOLOX_outputs/yolox_tiny_stft_relu/best_ckpt.pth
 Q_DIR=build/var/yolox_tiny_stft_quantized
