@@ -1,5 +1,6 @@
 function generate_training_signal(varargin)
 p = inputParser;
+addParameter(p, 'OutputDirectory', '', @(x) ischar(x) || isstring(x));
 addParameter(p, 'RunId', '');
 % RNG for reproducible signal
 addParameter(p, 'Seed', 1);
@@ -19,9 +20,17 @@ if ~isempty(args.RunId)
 else
     run_id = string(datetime('now','Format','yyyyMMdd_HHmmss'));  % e.g., 20250928_231045
 end
+if ~isempty(args.OutputDirectory)
+    output_dir = string(args.OutputDirectory);
+else
+    output_dir = "../../data/stft/";
+end
+if ~endsWith(output_dir, "/")
+    output_dir = output_dir + "/";
+end
 
 % ------------------------- DATASET PATHS -------------------------
-ds.root        = "../../data/stft/" + run_id;
+ds.root        = output_dir + run_id;
 ds.images_dir  = fullfile(ds.root, 'images_tiles');
 ds.ann_dir     = fullfile(ds.root, 'ann_tiles');
 ds.splits_dir  = fullfile(ds.root, 'splits');
