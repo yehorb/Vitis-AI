@@ -6,7 +6,17 @@ Reference implementation for running quantized YOLOX on Vitis AI DPU.
 Requires: vart, xir (installed on KV260 Vitis AI image)
 
 Usage:
+    # Single inference:
     python inference.py --model yolox_stft_kv260.xmodel --input spectrogram.npy
+
+    # Validation mode (requires ground truth labels):
+    python inference.py --model yolox_stft_kv260.xmodel \
+        --input val_spectrograms.npy \
+        --validate --gt val_labels.npy \
+        --conf 0.5 --nms 0.45 --iou-thre 0.5
+
+    # Export data for validation (from host):
+    stft-export-tile --h5 tiles.h5 --split val.txt --all --with-labels -o val_spectrograms.npy
 
 ================================================================================
 ARCHITECTURE OVERVIEW: Why DPU Outputs Separate Tensors
@@ -231,10 +241,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
+import typing as t
 from dataclasses import dataclass
 from functools import wraps
-import typing as t
 from typing import List, Optional, Tuple
 
 import numpy as np
@@ -263,6 +274,61 @@ class ModelConfig:
     strides: Tuple[int, ...] = (8, 16, 32)
     conf_threshold: float = 0.5
     nms_threshold: float = 0.45
+
+
+@dataclass
+class EvaluationConfig:
+    """Configuration for IoU-based evaluation matching evaluator.py."""
+
+    num_classes: int = 1
+    confthre: float = 0.5
+    nmsthre: float = 0.45
+    iouthre: float = 0.5
+
+
+@dataclass
+class PredictionStats:
+    """Statistics for prediction evaluation matching evaluator.py."""
+
+    tp: int = 0
+    fp: int = 0
+    fn: int = 0
+    gt: int = 0
+    pred: int = 0
+
+    def __add__(self, other: "PredictionStats") -> "PredictionStats":
+        if not isinstance(other, PredictionStats):
+            raise NotImplementedError
+        return PredictionStats(
+            self.tp + other.tp,
+            self.fp + other.fp,
+            self.fn + other.fn,
+            self.gt + other.gt,
+            self.pred + other.pred,
+        )
+
+    @property
+    def precision(self) -> float:
+        return self.tp / (self.tp + self.fp) if (self.tp + self.fp) > 0 else 0.0
+
+    @property
+    def recall(self) -> float:
+        return self.tp / (self.tp + self.fn) if (self.tp + self.fn) > 0 else 0.0
+
+    @property
+    def f1(self) -> float:
+        p, r = self.precision, self.recall
+        return 2 * p * r / (p + r) if (p + r) > 0 else 0.0
+
+    @property
+    def pd(self) -> float:
+        """Probability of detection (same as recall)."""
+        return self.tp / self.gt if self.gt > 0 else 0.0
+
+    @property
+    def pfd(self) -> float:
+        """Probability of false detection."""
+        return self.fp / (self.pred) if self.pred > 0 else 0.0
 
 
 # =============================================================================
@@ -648,6 +714,153 @@ def nms(
     return np.array(keep, dtype=np.int64)
 
 
+# =============================================================================
+# Validation Functions (ported from evaluator.py)
+# =============================================================================
+
+
+def compute_iou_matrix(
+    boxes1: npt.NDArray[np.float32],
+    boxes2: npt.NDArray[np.float32],
+) -> npt.NDArray[np.float32]:
+    """
+    Compute IoU between all pairs of boxes.
+
+    Args:
+        boxes1: Shape (M, 4) in xyxy format
+        boxes2: Shape (N, 4) in xyxy format
+
+    Returns:
+        IoU matrix of shape (M, N)
+    """
+    x1_1, y1_1, x2_1, y2_1 = boxes1[:, 0], boxes1[:, 1], boxes1[:, 2], boxes1[:, 3]
+    x1_2, y1_2, x2_2, y2_2 = boxes2[:, 0], boxes2[:, 1], boxes2[:, 2], boxes2[:, 3]
+
+    areas1 = (x2_1 - x1_1) * (y2_1 - y1_1)
+    areas2 = (x2_2 - x1_2) * (y2_2 - y1_2)
+
+    # Compute pairwise intersection
+    # Shape: (M, N)
+    xx1 = np.maximum(x1_1[:, None], x1_2[None, :])
+    yy1 = np.maximum(y1_1[:, None], y1_2[None, :])
+    xx2 = np.minimum(x2_1[:, None], x2_2[None, :])
+    yy2 = np.minimum(y2_1[:, None], y2_2[None, :])
+
+    w = np.maximum(0.0, xx2 - xx1)
+    h = np.maximum(0.0, yy2 - yy1)
+    intersection = w * h
+
+    # Compute union
+    union = areas1[:, None] + areas2[None, :] - intersection + 1e-6
+
+    return intersection / union
+
+
+def extract_gt_boxes(labels: npt.NDArray[np.float32]) -> npt.NDArray[np.float32]:
+    """
+    Extract ground truth boxes from labels array.
+
+    Ported from evaluator.py to work with numpy instead of torch.
+
+    Args:
+        labels: Shape (max_labels, 5) with format (class_id, cx, cy, w, h).
+                Zero-padded rows have sum == 0.
+
+    Returns:
+        boxes: Shape (N, 4) in xyxy format.
+    """
+    # Filter out zero-padded rows
+    valid_mask = labels.sum(axis=1) > 0
+    valid_targets = labels[valid_mask]
+
+    if len(valid_targets) == 0:
+        return np.empty((0, 4), dtype=np.float32)
+
+    # Convert cxcywh to xyxy
+    cx = valid_targets[:, 1]
+    cy = valid_targets[:, 2]
+    w = valid_targets[:, 3]
+    h = valid_targets[:, 4]
+
+    x1 = cx - w / 2
+    y1 = cy - h / 2
+    x2 = cx + w / 2
+    y2 = cy + h / 2
+
+    return np.stack([x1, y1, x2, y2], axis=1).astype(np.float32)
+
+
+def extract_pred_boxes(
+    detections: List[Tuple[npt.NDArray[np.float32], float]],
+) -> npt.NDArray[np.float32]:
+    """
+    Extract prediction boxes from postprocess output.
+
+    Args:
+        detections: List of (box, score) tuples from postprocess()
+
+    Returns:
+        boxes: Shape (N, 4) in xyxy format.
+    """
+    if len(detections) == 0:
+        return np.empty((0, 4), dtype=np.float32)
+
+    boxes = np.array([det[0] for det in detections], dtype=np.float32)
+    return boxes
+
+
+def match_boxes(
+    pred_boxes: npt.NDArray[np.float32],
+    gt_boxes: npt.NDArray[np.float32],
+    cfg: EvaluationConfig,
+) -> PredictionStats:
+    """
+    Match predictions to ground truth using greedy IoU matching.
+
+    Ported from evaluator.py to work with numpy instead of torch.
+
+    Args:
+        pred_boxes: Shape (M, 4) predicted boxes in xyxy format.
+        gt_boxes: Shape (N, 4) ground truth boxes in xyxy format.
+        cfg: Evaluation configuration with IoU threshold.
+
+    Returns:
+        PredictionStats with TP, FP, FN counts.
+    """
+    n_pred = len(pred_boxes)
+    n_gt = len(gt_boxes)
+
+    if n_pred == 0 and n_gt == 0:
+        return PredictionStats(0, 0, 0, 0, 0)
+    if n_pred == 0:
+        # All ground truth boxes are missed (false negatives)
+        return PredictionStats(0, 0, n_gt, n_gt, 0)
+    if n_gt == 0:
+        # All predictions are false positives
+        return PredictionStats(0, n_pred, 0, 0, n_pred)
+
+    # Compute IoU matrix [M, N]
+    iou_matrix = compute_iou_matrix(pred_boxes, gt_boxes)
+
+    # Greedy matching: for each prediction, find best GT match
+    matched_gt: set[int] = set()
+    tp = 0
+
+    for pred_idx in range(n_pred):
+        ious = iou_matrix[pred_idx]
+        best_gt_idx = int(np.argmax(ious))
+        best_iou = float(ious[best_gt_idx])
+
+        if best_iou >= cfg.iouthre and best_gt_idx not in matched_gt:
+            tp += 1
+            matched_gt.add(best_gt_idx)
+
+    fp = n_pred - tp
+    fn = n_gt - len(matched_gt)
+
+    return PredictionStats(tp, fp, fn, n_gt, n_pred)
+
+
 def postprocess(
     outputs: List[npt.NDArray[np.float32]],
     config: ModelConfig,
@@ -820,6 +1033,81 @@ class YoloxInference:
             print(f"Average runtime: {fun_avg_ms}")
         return avg_ms
 
+    def validate(
+        self,
+        spectrograms: npt.NDArray[np.float32],
+        labels: npt.NDArray[np.float32],
+        eval_config: Optional[EvaluationConfig] = None,
+    ) -> Tuple[PredictionStats, str]:
+        """
+        Run validation on a dataset of spectrograms with ground truth labels.
+
+        Ported from evaluator.py StftEvaluator.evaluate() to work on edge.
+
+        Args:
+            spectrograms: Array of spectrograms, shape (N, H, W)
+            labels: Ground truth labels, shape (N, max_labels, 5)
+                    Format per label: (class_id, cx, cy, w, h), zero-padded
+            eval_config: Evaluation configuration. If None, uses defaults
+                         matching model config thresholds.
+
+        Returns:
+            stats: PredictionStats with aggregated TP, FP, FN, etc.
+            summary: Human-readable summary string.
+        """
+        if eval_config is None:
+            eval_config = EvaluationConfig(
+                num_classes=self.config.num_classes,
+                confthre=self.config.conf_threshold,
+                nmsthre=self.config.nms_threshold,
+            )
+
+        n_samples = spectrograms.shape[0]
+        stats = PredictionStats()
+        inference_time = 0.0
+
+        print(f"Validating {n_samples} samples...")
+
+        for i in range(n_samples):
+            # Run inference
+            start = time.perf_counter()
+            detections = self.detect(spectrograms[i])
+            inference_time += time.perf_counter() - start
+
+            # Extract boxes
+            pred_boxes = extract_pred_boxes(detections)
+            gt_boxes = extract_gt_boxes(labels[i])
+
+            # Match and accumulate stats
+            sample_stats = match_boxes(pred_boxes, gt_boxes, eval_config)
+            stats += sample_stats
+
+            # Progress update every 100 samples
+            if (i + 1) % 100 == 0 or i == n_samples - 1:
+                print(f"  Processed {i + 1}/{n_samples} samples")
+
+        # Compute summary
+        avg_time_ms = 1000 * inference_time / n_samples if n_samples > 0 else 0.0
+
+        summary = (
+            f"STFT Edge Validation Results\n"
+            f"-----------------------------\n"
+            f"Samples   : {n_samples}\n"
+            f"GT        : {stats.gt}\n"
+            f"Pred      : {stats.pred}\n"
+            f"TP        : {stats.tp}\n"
+            f"FP        : {stats.fp}\n"
+            f"FN        : {stats.fn}\n"
+            f"Pd        : {stats.pd:.4f}\n"
+            f"Pfd       : {stats.pfd:.4f}\n"
+            f"Precision : {stats.precision:.4f}\n"
+            f"Recall    : {stats.recall:.4f}\n"
+            f"F1 Score  : {stats.f1:.4f}\n"
+            f"Avg inference time : {avg_time_ms:.2f} ms/image\n"
+        )
+
+        return stats, summary
+
 
 def visualize_predictions(
     spectrogram: npt.NDArray[np.float32],
@@ -961,6 +1249,23 @@ def main():
         action="store_true",
         help="Plot input spectrogram and boxes using matplotlib",
     )
+    parser.add_argument(
+        "--validate",
+        action="store_true",
+        help="Run validation mode with ground truth labels",
+    )
+    parser.add_argument(
+        "--gt",
+        type=str,
+        default=None,
+        help="Path to ground truth labels (.npy file) for validation mode",
+    )
+    parser.add_argument(
+        "--iou-thre",
+        type=float,
+        default=0.5,
+        help="IoU threshold for matching predictions to ground truth (default: 0.5)",
+    )
 
     args = parser.parse_args()
 
@@ -988,6 +1293,33 @@ def main():
 
     if args.benchmark:
         inference.benchmark(spectrogram)
+    elif args.validate:
+        # Validation mode
+        if args.gt is None:
+            parser.error("--validate requires --gt <labels.npy>")
+
+        labels = np.load(args.gt)
+        print(f"Labels shape: {labels.shape}, dtype: {labels.dtype}")
+
+        # Ensure spectrogram has 3 dimensions (N, H, W)
+        if len(spectrogram.shape) == 2:
+            spectrogram = spectrogram[np.newaxis, ...]
+
+        # Ensure labels has 3 dimensions (N, max_labels, 5)
+        if len(labels.shape) == 2:
+            labels = labels[np.newaxis, ...]
+
+        # Create evaluation config
+        eval_config = EvaluationConfig(
+            num_classes=config.num_classes,
+            confthre=args.conf,
+            nmsthre=args.nms,
+            iouthre=args.iou_thre,
+        )
+
+        # Run validation
+        stats, summary = inference.validate(spectrogram, labels, eval_config)
+        print("\n" + summary)
     else:
         # Run detection
         detections = inference.detect(spectrogram)
@@ -1003,6 +1335,8 @@ def main():
 
 
 def timing(f, stats: t.Optional[TimingStats] = None):
+    should_log = os.environ.get("VERBOSE", "0") == "1"
+
     @wraps(f)
     def wrap(*args, **kw):
         ts = time.perf_counter()
@@ -1010,7 +1344,8 @@ def timing(f, stats: t.Optional[TimingStats] = None):
         te = time.perf_counter()
         elapsed = (te - ts) * 1000
         if stats is None:
-            print("func:%r took: %2.4f ms" % (f.__name__, elapsed))
+            if should_log:
+                print("func:%r took: %2.4f ms" % (f.__name__, elapsed))
         else:
             if f.__name__ not in stats:
                 stats[f.__name__] = []

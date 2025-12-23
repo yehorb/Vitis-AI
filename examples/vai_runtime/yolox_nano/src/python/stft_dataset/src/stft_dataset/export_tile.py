@@ -109,7 +109,7 @@ def main() -> None:
         # img shape is [1, H, W] from StftDataset, we want [H, W] for edge inference
         spectrogram = img[0]  # Remove channel dimension
     else:
-        img, _, _ = dataset[0]
+        img, labels, _ = dataset[0]
         _, H, W = img.shape
         num_tiles = len(dataset)
         spectrogram = np.zeros((num_tiles, H, W), dtype=np.float32)
@@ -128,9 +128,29 @@ def main() -> None:
     print(f"Saved spectrogram: {args.output}")
 
     # Optionally save labels
-    if args.all:
-        print("--all is not compatible with --with-labels")
-        print("labels will not be saved")
+    # Export labels for batch mode
+    if args.with_labels and args.all:
+        num_tiles = len(dataset)
+        # Determine max labels per tile by scanning dataset
+        max_labels = 0
+        for i in range(num_tiles):
+            _, labels_i, _ = dataset[i]
+            max_labels = max(max_labels, len(labels_i))
+
+        # Create padded labels array: (N, max_labels, 5)
+        # Format per label: (class_id, cx, cy, w, h)
+        all_labels = np.zeros((num_tiles, max_labels, 5), dtype=np.float32)
+        for i in range(num_tiles):
+            _, labels_i, _ = dataset[i]
+            n_labels = len(labels_i)
+            if n_labels > 0:
+                all_labels[i, :n_labels, :] = labels_i
+
+        labels_path = args.output.with_name(args.output.stem + "_labels.npy")
+        np.save(labels_path, all_labels)
+        print(f"Saved labels: {labels_path}")
+        print(f"Labels shape: {all_labels.shape} (N, max_labels, 5)")
+
     if args.with_labels and not args.all:
         labels_path = args.output.with_name(args.output.stem + "_labels.npy")
         np.save(labels_path, labels)
